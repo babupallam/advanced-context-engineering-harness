@@ -3,6 +3,7 @@ import streamlit as st
 
 from src.document_loader import load_uploaded_document
 from src.text_cleaner import clean_text
+from src.naive_chunker import naive_chunk_text
 
 
 st.set_page_config(
@@ -76,6 +77,25 @@ with st.sidebar:
 
     st.divider()
 
+    st.subheader("Naive Chunk Settings")
+
+    naive_chunk_size = st.number_input(
+        "Naive chunk size",
+        min_value=300,
+        max_value=3000,
+        value=1000,
+        step=100
+    )
+
+    naive_chunk_overlap = st.number_input(
+        "Naive chunk overlap",
+        min_value=0,
+        max_value=500,
+        value=150,
+        step=50
+    )
+
+
     st.subheader("Retrieval Settings")
 
     embedding_model_name = st.selectbox(
@@ -136,8 +156,16 @@ if uploaded_file is not None:
 
         st.session_state.document_text = cleaned_text
         st.session_state.uploaded_file_name = uploaded_file.name
+
+        # Generate naive chunks immediately after text extraction and cleaning
+        st.session_state.naive_chunks = naive_chunk_text(
+            text = st.session_state.document_text,
+            chunk_size= naive_chunk_size,
+            overlap= naive_chunk_overlap
+        )
+
     except Exception as e:
-        st.error(f"Error loading document: {e}")
+        st.error(f"Document extraction or chunking failed: {e}")
         st.session_state.document_text = ""
         st.session_state.uploaded_file_name = ""
 
@@ -303,8 +331,25 @@ with tab_3:
             "parent-child retrieval, re-ranking, and compact context building are added."
         )
     st.divider()
+    with st.expander("Naive Chunks Preview"):
+        if st.session_state.naive_chunks:
+            for chunk in st.session_state.naive_chunks:
+                st.markdown(f"**Chunk {chunk['chunk_id']}**")
+                st.caption(f"Start: {chunk['start_character']}, End: {chunk['end_character']}, Characters: {chunk['character_count']}")
+                st.text_area(
+                    "Chunk Text",
+                    chunk['text'],
+                    height=100,
+                    disabled=True
+                )
+                st.divider()
+        else:
+            st.caption("No naive chunks available.")            
+            st.info("Upload a document to generate naive chunks.")
+
     st.info(
-        "Coming next: context used by both approaches, token comparison, "
-        "and retrieval quality explanation."
+        "Coming next: sentence splitting for semantic chunking."
     )
+
+
 
