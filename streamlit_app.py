@@ -4,6 +4,8 @@ import streamlit as st
 from src.document_loader import load_uploaded_document
 from src.text_cleaner import clean_text
 from src.naive_chunker import naive_chunk_text
+from src.semantic_chunker import split_into_sentences
+
 
 
 st.set_page_config(
@@ -163,6 +165,7 @@ if uploaded_file is not None:
             chunk_size= naive_chunk_size,
             overlap= naive_chunk_overlap
         )
+        st.session_state.sentences = split_into_sentences(st.session_state.document_text)
 
     except Exception as e:
         st.error(f"Document extraction or chunking failed: {e}")
@@ -278,9 +281,27 @@ with tab_1:
     with col_c:
         st.metric("Semantic Chunk Count", len(st.session_state.semantic_chunks))
 
+    st.divider()
+    st.header("Sentence Splitting Preview")
+    if st.session_state.sentences:
+        sentence_preview = st.session_state.sentences[:20]
+        st.dataframe(sentence_preview,
+        use_container_width=True,
+        hide_index=True,
+        )
+
+        with st.expander("View all extracted sentences"):
+            st.dataframe(st.session_state.sentences,
+            use_container_width=True,
+            hide_index=True,
+            )
+    else:
+        st.info("No sentences available.")
+        st.info("Upload a document to generate sentence-level units.")
+
     st.info(
-        "Coming next: sentence extraction, sentence embeddings, cosine distance, "
-        "semantic breakpoints, and chunk visualization."
+        "Coming next: sentence embeddings, cosine distance, semantic breakpoints, "
+        "and chunk visualization."
     )
 
 
