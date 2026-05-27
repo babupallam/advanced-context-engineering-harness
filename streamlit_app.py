@@ -1,6 +1,10 @@
 from numpy import percentile
 import streamlit as st
 
+from src.document_loader import load_uploaded_document
+from src.text_cleaner import clean_text
+
+
 st.set_page_config(
     page_title="Advanced Context Engineering Harness",
     page_icon="🧠",
@@ -64,7 +68,7 @@ with st.sidebar:
         type=["pdf", "txt", "csv"]
     )
 
-    quetion = st.text_area(
+    question = st.text_area(
         "Enter a complex question",
         height =140,
         placeholder="Example: What are the main risks in this document and how can they be reduced?",
@@ -123,6 +127,26 @@ with st.sidebar:
         st.session_state.uploaded_file_name = uploaded_file.name
         
 
+# Document loading and cleaning
+
+if uploaded_file is not None:
+    try:
+        document_text = load_uploaded_document(uploaded_file)
+        cleaned_text = clean_text(document_text)
+
+        st.session_state.document_text = cleaned_text
+        st.session_state.uploaded_file_name = uploaded_file.name
+    except Exception as e:
+        st.error(f"Error loading document: {e}")
+        st.session_state.document_text = ""
+        st.session_state.uploaded_file_name = ""
+
+#Basic document stats
+document_character_count = len(st.session_state.document_text) if st.session_state.document_text else 0
+document_word_count = len(st.session_state.document_text.split()) if st.session_state.document_text else 0
+
+
+
 st.subheader("Context Efficiency Metrics")    
 
 matric_col1, matric_col2, matric_col3, matric_col4, matric_col5 = st.columns(5)
@@ -158,22 +182,36 @@ with matric_col5:
     )
 
 
-# status box
+# status box - document status
 if st.session_state.uploaded_file_name:
-    st.success(f"Uploaded file detected: {st.session_state.uploaded_file_name}")
+    st.success(f"Uploaded and extracted: {st.session_state.uploaded_file_name}")
+    state_col1, state_col2 = st.columns(2)
+    with state_col1:
+        st.metric("Document Character Count", document_character_count)
+    with state_col2:
+        st.metric("Document Word Count", document_word_count)
+    with st.expander("Document Text Preview"):
+        st.text_area(
+            "Extracted Document Preview", 
+            st.session_state.document_text[:500] + "...", 
+            height=200, 
+            disabled=True
+        )
+
 else:
     st.info("Upload a PDF or TXT document from the sidebar to begin.")
 
 
 if run_button:
-    st.warning(
-        "The UI button works, but backend analysis is not connected yet. "
-        "Document extraction will be added in the next step."
-    )
+    if not st.session_state.document_text:
+        st.warning("Please upload a document first.")
+    elif not question.strip():
+        st.warning("Please enter a question first.")
+    else:
+        st.warning("Document extraction is working. The next step will add naive chunking.")
+            
 
-
-#Create three main tabs
-
+# Three tabs for displaying different aspects of the context engineering process
 tab_1, tab_2, tab_3 = st.tabs(
     [
         "Semantic Chunk Map",
