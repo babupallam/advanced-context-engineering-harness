@@ -24,6 +24,8 @@ from src.semantic_chunker import (
 from src.metadata_anchor import create_document_metadata, attach_metadata_to_chunks, build_embedding_texts
 from src.parent_child import create_parent_child_chunks, build_child_embedding_text
 from src.vector_store import build_vector_index, retrieve_top_k
+from src.reranker import load_reranker_model, rerank_results, get_selected_reranked_results
+
 
 st.set_page_config(
     page_title="Advanced Context Engineering Harness",
@@ -104,6 +106,19 @@ def get_cached_embedding_model(model_name: str):
 
     return load_embedding_model(model_name)
 
+#cache the re-ranker model
+@st.cache_resource
+def get_cached_reranker_model(model_name):
+    """
+    STEP 1:
+    Cache the cross-encoder re-ranker model.
+
+    Why:
+    Cross-encoder models can take time to load.
+    Caching prevents repeated loading on every Streamlit rerun.
+    """
+
+    return load_reranker_model(model_name)
 
 
 #title and description
@@ -363,6 +378,15 @@ if run_button:
         embedding_model = get_cached_embedding_model(
             embedding_model_name
         )
+
+        """
+        STEP 1:
+        Run raw vector retrieval first.
+
+        This version stays available in:
+        st.session_state.raw_vector_results
+        """
+
         st.session_state.raw_vector_results = retrieve_top_k(
             query=question,
             child_chunks=st.session_state.child_chunks,
@@ -370,10 +394,33 @@ if run_button:
             embedding_model=embedding_model,
             top_k=raw_top_k
         )
-        st.success(
-            "Raw vector retrieval completed. Open Tab 2 to review the top vector hits."
+
+        """
+        STEP 2:
+        Run cross-encoder re-ranking on the raw vector results.
+
+        This creates a new version:
+        st.session_state.reranked_results
+
+        It does not remove or overwrite raw_vector_results.
+        """
+
+        reranker_model = get_cached_reranker_model(
+            reranker_model_name
         )
-            
+
+        st.session_state.reranked_results = rerank_results(
+            query=question,
+            raw_results=st.session_state.raw_vector_results,
+            reranker_model=reranker_model,
+            top_n=final_top_n
+        )
+
+        st.success(
+            "Raw vector retrieval and cross-encoder re-ranking completed. "
+            "Open Tab 2 to compare both ranking versions."
+        )
+               
 
 # Three tabs for displaying different aspects of the context engineering process
 tab_1, tab_2, tab_3 = st.tabs(
@@ -621,7 +668,7 @@ with tab_2:
 
     st.divider()
 
-    st.subheader("Raw Vector Search Results")
+    st.subheader("Version 4: Raw Vector Search Results")
 
     if st.session_state.raw_vector_results:
         raw_results_table = []
@@ -673,18 +720,130 @@ with tab_2:
 
         st.divider()
 
+        st.subheader("Version 5: Cross-encoder Re-ranker Results")
+        if st.session_state.reranked_results:
+            reranked_table = []
+
+            for result in st.session_state.reranked_results:
+                reranked_table.append(
+                    {
+                        "rerank_position": result["rerank_position"],
+                        "raw_rank": result["raw_rank"],
+                        "child_id": result["child_id"],
+                        "parent_id": result["parent_id"],
+                        "vector_similarity": result["vector_similarity"],
+                        "reranker_score": result["reranker_score"],
+                        "selected_for_final_context": result["selected"],
+                        "chunk_preview": result["chunk_preview"],
+                    }
+                )
+
+            st.dataframe(
+                reranked_table,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.info(
+                "Notice that the re-ranked order may differ from the raw vector order. "
+                "This is the point of re-ranking: it performs deeper relevance scoring."
+            )
+
+    else:
         st.info(
-            "Next step: add a cross-encoder re-ranker. Vector search is fast, "
-            "but it can still rank shallow matches too highly. The re-ranker will "
-            "score the question and chunk together."
+            "Re-ranked results will appear here after running the analysis."
+        )
+
+    st.divider()
+
+    st.subheader("Final Selected Top Chunks")
+
+    selected_results = get_selected_reranked_results(
+        st.session_state.reranked_results
+    )
+
+    if selected_results:
+        selected_table = []
+
+        for result in selected_results:
+            selected_table.append(
+                {
+                    "rerank_position": result["rerank_position"],
+                    "raw_rank": result["raw_rank"],
+                    "child_id": result["child_id"],
+                    "parent_id": result["parent_id"],
+                    "reranker_score": result["reranker_score"],
+                    "child_preview": result["child_text"][:250],
+                }
+            )
+
+        st.dataframe(
+            selected_table,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        with st.expander("View Selected Re-ranked Chunk Details"):
+            for result in selected_results:
+                st.markdown(
+                    f"### Selected Chunk {result['rerank_position']}"
+                )
+
+                st.caption(
+                    f"Raw Rank: {result['raw_rank']} | "
+                    f"Reranker Score: {result['reranker_score']} | "
+                    f"Child ID: {result['child_id']} | "
+                    f"Parent ID: {result['parent_id']}"
+                )
+
+                st.markdown("#### Child Text Used for Re-ranking")
+                st.write(result["child_text"])
+
+                st.markdown("#### Parent Text Kept for Final Context")
+                st.write(result["parent_text"])
+
+                st.divider()
+
+    else:
+        st.info(
+            "Final selected chunks will appear here after re-ranking."
+        )
+
+    st.divider()
+
+    st.subheader("Raw Rank vs Re-ranked Position")
+
+    if st.session_state.reranked_results:
+        rank_comparison_table = []
+
+        for result in st.session_state.reranked_results:
+            rank_comparison_table.append(
+                {
+                    "child_id": result["child_id"],
+                    "raw_rank": result["raw_rank"],
+                    "rerank_position": result["rerank_position"],
+                    "rank_change": result["raw_rank"] - result["rerank_position"],
+                    "vector_similarity": result["vector_similarity"],
+                    "reranker_score": result["reranker_score"],
+                    "selected": result["selected"],
+                }
+            )
+
+        st.dataframe(
+            rank_comparison_table,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.caption(
+            "Positive rank_change means the chunk moved higher after re-ranking. "
+            "Negative rank_change means it moved lower."
         )
 
     else:
         st.info(
-            "Run the analysis after uploading a document and entering a question. "
-            "Raw vector results will appear here."
+            "Rank comparison will appear after re-ranking."
         )
-
 
 # ============================================================
 # TAB 3: NAIVE RAG VS ENGINEERED CONTEXT
@@ -784,6 +943,33 @@ with tab_3:
             "Raw Vector Results",
             len(st.session_state.raw_vector_results)
         )
+        
+        st.markdown("### Version 5: Cross-Encoder Re-ranked Results")
 
+        st.write(
+            "Uses a cross-encoder to score the question and child chunk together. "
+            "This keeps raw vector results for review, but adds a more precise "
+            "ranking layer before final context building."
+        )
+
+        col_rerank_all, col_rerank_selected = st.columns(2)
+
+        with col_rerank_all:
+            st.metric(
+                "Re-ranked Candidates",
+                len(st.session_state.reranked_results)
+            )
+
+        with col_rerank_selected:
+            selected_count = len(
+                get_selected_reranked_results(
+                    st.session_state.reranked_results
+                )
+            )
+
+            st.metric(
+                "Selected Final Chunks",
+                selected_count
+            )
 
 
