@@ -26,6 +26,8 @@ from src.parent_child import create_parent_child_chunks, build_child_embedding_t
 from src.vector_store import build_vector_index, retrieve_top_k
 from src.reranker import load_reranker_model, rerank_results, get_selected_reranked_results
 
+from src.context_builder import build_naive_context, build_engineered_context
+from src.metrics import calculate_context_metrics
 
 st.set_page_config(
     page_title="Advanced Context Engineering Harness",
@@ -93,6 +95,12 @@ if "vector_index" not in st.session_state:
     st.session_state.vector_index = {}
 if "raw_vector_results" not in st.session_state:
     st.session_state.raw_vector_results = []
+
+
+if "naive_context" not in st.session_state:
+    st.session_state.naive_context = ""
+if "engineered_context" not in st.session_state:
+    st.session_state.engineered_context = ""
 
 
 #cache the embedding model
@@ -227,6 +235,28 @@ with st.sidebar:
         value=40,
         step=10
     )
+
+    st.divider()
+
+    st.subheader("Context Building Settings")
+
+    naive_context_max_chunks = st.number_input(
+        "Naive context max chunks",
+        min_value=1,
+        max_value=50,
+        value=5,
+        step=1
+    )
+
+    engineered_context_max_chunks = st.number_input(
+        "Engineered context max chunks",
+        min_value=1,
+        max_value=50,
+        value=5,
+        step=1
+    )
+
+    st.divider()
 
     # this button is used to run the context engineering analysis
     run_button = st.button(
@@ -414,6 +444,26 @@ if run_button:
             raw_results=st.session_state.raw_vector_results,
             reranker_model=reranker_model,
             top_n=final_top_n
+        )
+
+        # build the naive context
+        # This context is built from the raw vector results directly without re-ranking or duplicate parent removal
+        st.session_state.naive_context = build_naive_context(
+            raw_vector_results=st.session_state.raw_vector_results,
+            max_chunks=naive_context_max_chunks
+        )
+        # build the engineered context
+        # This context is built from the re-ranked results with duplicate parent removal
+        st.session_state.engineered_context = build_engineered_context(
+            reranked_results=st.session_state.reranked_results
+        )
+
+        # calculate the context metrics
+        # These metrics help us understand how much context we are saving by using engineered context instead of naive context
+        st.session_state.metrics = calculate_context_metrics(
+            full_text=st.session_state.document_text,
+            naive_context=st.session_state.naive_context,
+            engineered_context=st.session_state.engineered_context
         )
 
         st.success(
@@ -857,42 +907,105 @@ with tab_2:
 
 with tab_3:
     st.header("Naive RAG vs Engineered Context")
-    left_col, right_col = st.columns(2)
-    with left_col:
-        st. subheader("Naive RAG Answer")
-        st.write( 
-            "The naive answer will appear here after fixed-size chunking, "
-            "vector search, and LLM generation are added."
-        )
-    with right_col:
-        st. subheader("Engineered Context Answer")
-        st.write( 
-            "The engineered context answer will appear here after semantic chunking, "
-            "parent-child retrieval, re-ranking, and compact context building are added."
-        )
-    st.divider()
-    with st.expander("Naive Chunks Preview"):
-        if st.session_state.naive_chunks:
-            for chunk in st.session_state.naive_chunks:
-                st.markdown(f"**Chunk {chunk['chunk_id']}**")
-                st.caption(f"Start: {chunk['start_character']}, End: {chunk['end_character']}, Characters: {chunk['character_count']}")
-                st.text_area(
-                    "Chunk Text",
-                    chunk['text'],
-                    height=100,
-                    disabled=True
-                )
-                st.divider()
-        else:
-            st.caption("No naive chunks available.")            
-            st.info("Upload a document to generate naive chunks.")
+
+    st.write(
+        "This tab compares the baseline naive context against the engineered context. "
+        "All previous versions are kept available for review."
+    )
 
     st.divider()
-    with st.expander("Compare Available Chunking Versions"):
+
+    left_col, right_col = st.columns(2)
+
+    with left_col:
+        st.subheader("Naive RAG Context Version")
+
+        if st.session_state.naive_context:
+            st.success("Naive context created from raw vector results.")
+
+            st.metric(
+                "Naive Context Tokens",
+                st.session_state.metrics["naive_context_tokens"]
+            )
+
+            with st.expander("View Naive Context Used"):
+                st.text_area(
+                    "Naive Context",
+                    value=st.session_state.naive_context,
+                    height=400,
+                    disabled=True
+                )
+        else:
+            st.info(
+                "Naive context will appear after running retrieval analysis."
+            )
+
+    with right_col:
+        st.subheader("Engineered Context Version")
+
+        if st.session_state.engineered_context:
+            st.success("Engineered context created from selected re-ranked parent chunks.")
+
+            st.metric(
+                "Engineered Context Tokens",
+                st.session_state.metrics["engineered_context_tokens"]
+            )
+
+            with st.expander("View Engineered Context Used"):
+                st.text_area(
+                    "Engineered Context",
+                    value=st.session_state.engineered_context,
+                    height=400,
+                    disabled=True
+                )
+        else:
+            st.info(
+                "Engineered context will appear after running re-ranking analysis."
+            )
+
+    st.divider()
+
+    st.subheader("Token Efficiency Comparison")
+
+    metric_a, metric_b, metric_c, metric_d, metric_e = st.columns(5)
+
+    with metric_a:
+        st.metric(
+            "Full Document Tokens",
+            st.session_state.metrics["full_document_tokens"]
+        )
+
+    with metric_b:
+        st.metric(
+            "Naive Context Tokens",
+            st.session_state.metrics["naive_context_tokens"]
+        )
+
+    with metric_c:
+        st.metric(
+            "Engineered Tokens",
+            st.session_state.metrics["engineered_context_tokens"]
+        )
+
+    with metric_d:
+        st.metric(
+            "Tokens Saved %",
+            f'{st.session_state.metrics["tokens_saved_percent"]}%'
+        )
+
+    with metric_e:
+        st.metric(
+            "Context Reduction %",
+            f'{st.session_state.metrics["context_reduction_percent"]}%'
+        )
+
+    st.divider()
+
+    with st.expander("Compare Available Pipeline Versions"):
         st.markdown("### Version 1: Naive Fixed-Size Chunks")
 
         st.write(
-            "Used as the baseline. It splits by character count and may cut ideas."
+            "Baseline chunking version. It splits by character count and may cut ideas."
         )
 
         st.metric(
@@ -903,7 +1016,7 @@ with tab_3:
         st.markdown("### Version 2: Semantic Chunks")
 
         st.write(
-            "Uses sentence distance spikes to split around meaning shifts."
+            "Meaning-based chunking version. It uses sentence distance spikes."
         )
 
         st.metric(
@@ -931,25 +1044,30 @@ with tab_3:
                 "Child Chunk Count",
                 len(st.session_state.child_chunks)
             )
-        
+
         st.markdown("### Version 4: Raw Vector Retrieval Results")
 
         st.write(
-            "Uses the user question to search child chunks by embedding similarity. "
-            "This is the candidate generation stage before re-ranking."
+            "Uses the question to search child chunks by vector similarity."
         )
 
         st.metric(
             "Raw Vector Results",
             len(st.session_state.raw_vector_results)
         )
-        
+
         st.markdown("### Version 5: Cross-Encoder Re-ranked Results")
 
         st.write(
-            "Uses a cross-encoder to score the question and child chunk together. "
-            "This keeps raw vector results for review, but adds a more precise "
-            "ranking layer before final context building."
+            "Uses a cross-encoder to re-rank raw vector candidates more precisely."
+        )
+
+        selected_count = len(
+            [
+                result
+                for result in st.session_state.reranked_results
+                if result.get("selected") is True
+            ]
         )
 
         col_rerank_all, col_rerank_selected = st.columns(2)
@@ -961,15 +1079,28 @@ with tab_3:
             )
 
         with col_rerank_selected:
-            selected_count = len(
-                get_selected_reranked_results(
-                    st.session_state.reranked_results
-                )
-            )
-
             st.metric(
                 "Selected Final Chunks",
                 selected_count
             )
 
+        st.markdown("### Version 6: Context Builder and Token Metrics")
 
+        st.write(
+            "Builds final naive and engineered contexts separately, then compares "
+            "their approximate token usage."
+        )
+
+        col_naive_context, col_engineered_context = st.columns(2)
+
+        with col_naive_context:
+            st.metric(
+                "Naive Context Tokens",
+                st.session_state.metrics["naive_context_tokens"]
+            )
+
+        with col_engineered_context:
+            st.metric(
+                "Engineered Context Tokens",
+                st.session_state.metrics["engineered_context_tokens"]
+            )

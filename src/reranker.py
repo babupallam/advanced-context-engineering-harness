@@ -19,7 +19,6 @@ def load_reranker_model(model_name):
 
     This is usually slower but more accurate.
     """
-
     model = CrossEncoder(model_name)
 
     return model
