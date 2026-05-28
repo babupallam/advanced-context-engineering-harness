@@ -56,8 +56,7 @@ def calculate_context_metrics(full_text, naive_context, engineered_context):
 
     if full_document_tokens > 0:
         context_reduction_percent = (
-            (full_document_tokens - engineered_context_tokens) # calculate the tokens saved by engineered context
-            / full_document_tokens # divide by the number of tokens in the full document
+            (full_document_tokens - engineered_context_tokens)
             / full_document_tokens
         ) * 100
     else:
@@ -69,4 +68,33 @@ def calculate_context_metrics(full_text, naive_context, engineered_context):
         "engineered_context_tokens": engineered_context_tokens,
         "tokens_saved_percent": round(tokens_saved_percent, 2),
         "context_reduction_percent": round(context_reduction_percent, 2),
+    }
+
+
+def calculate_llm_call_token_estimates(question, context, answer):
+    """
+    Estimate token usage for one LLM call.
+
+    This is approximate and will not exactly match the provider dashboard.
+    Provider dashboards use the model's actual tokenizer and include all
+    hidden/provider-side formatting.
+    """
+
+    question_tokens = count_approx_tokens(question)
+    context_tokens = count_approx_tokens(context)
+    answer_tokens = count_approx_tokens(answer)
+
+    system_prompt_estimate = 80
+
+    input_tokens = question_tokens + context_tokens + system_prompt_estimate
+    output_tokens = answer_tokens
+    total_tokens = input_tokens + output_tokens
+
+    return {
+        "question_tokens": question_tokens,
+        "context_tokens": context_tokens,
+        "system_prompt_estimate": system_prompt_estimate,
+        "estimated_input_tokens": input_tokens,
+        "estimated_output_tokens": output_tokens,
+        "estimated_total_tokens": total_tokens,
     }
