@@ -21,6 +21,8 @@ from src.semantic_chunker import (
     find_semantic_breakpoints,
     build_semantic_chunks
 )
+from src.metadata_anchor import create_document_metadata, attach_metadata_to_chunks, build_embedding_texts
+
 
 st.set_page_config(
     page_title="Advanced Context Engineering Harness",
@@ -77,6 +79,9 @@ if "semantic_breakpoints" not in st.session_state:
 
 if "semantic_chunks" not in st.session_state:
     st.session_state.semantic_chunks = []
+
+if "document_metadata" not in st.session_state:
+    st.session_state.document_metadata = {}
 
 
 #cache the embedding model
@@ -198,12 +203,19 @@ if uploaded_file is not None:
         st.session_state.document_text = cleaned_text
         st.session_state.uploaded_file_name = uploaded_file.name
 
-        # Generate naive chunks immediately after text extraction and cleaning
-        st.session_state.naive_chunks = naive_chunk_text(
-            text = st.session_state.document_text,
-            chunk_size= naive_chunk_size,
-            overlap= naive_chunk_overlap
+        st.session_state.document_metadata = create_document_metadata(
+            uploaded_file.name, 
+            st.session_state.document_text
         )
+
+        #Naive chunking
+
+        # Generate naive chunks immediately after text extraction and cleaning
+        naive_chunks = naive_chunk_text(text = st.session_state.document_text,chunk_size= naive_chunk_size,overlap= naive_chunk_overlap)
+        st.session_state.naive_chunks = attach_metadata_to_chunks(naive_chunks, st.session_state.document_metadata)
+
+        #Semantic chunking
+
         st.session_state.sentences = split_into_sentences(st.session_state.document_text)
 
         if st.session_state.sentences:
@@ -388,6 +400,23 @@ with tab_1:
         st.info("No semantic breakpoints detected.")
         st.info("Upload a document to calculate sentence embeddings and semantic distances.")
     
+    st.divider()
+    st.subheader("Metadata Anchoring Preview")
+    if st.session_state.document_metadata:
+        st.json(st.session_state.document_metadata)
+        if st.session_state.semantic_chunks:
+            sample_chunk = st.session_state.semantic_chunks[0]
+            with st.expander("View sample Metadata Anchored Embeddding Text"):
+                st.text(build_embedding_texts(sample_chunk))
+        elif st.session_state.naive_chunks:
+            sample_chunk = st.session_state.naive_chunks[0]
+            with st.expander("View sample Metadata Anchored Embeddding Text"):
+                st.text(build_embedding_texts(sample_chunk))
+        else:
+            st.info("No chunks available to preview metadata anchoring.")
+            st.info("Upload a document to generate chunks and metadata.")
+
+
     st.divider()
     st.subheader("Final Semantic Chunks")
     if st.session_state.semantic_chunks:
