@@ -4,4 +4,4 @@ numpy
 pymupdf
 sentence-transformers
 scikit-learn
-torchvision
+openai

@@ -19,3 +19,4 @@ env/
 *.pyc
 src/__pycache__/*
 
+.streamlit/secrets.toml

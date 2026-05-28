@@ -28,6 +28,8 @@ from src.reranker import load_reranker_model, rerank_results, get_selected_reran
 
 from src.context_builder import build_naive_context, build_engineered_context
 from src.metrics import calculate_context_metrics
+from src.llm_client import generate_answer
+
 
 st.set_page_config(
     page_title="Advanced Context Engineering Harness",
@@ -256,7 +258,52 @@ with st.sidebar:
         step=1
     )
 
+
     st.divider()
+
+    st.subheader("LLM Provider Settings")
+
+    default_base_url = st.secrets.get(
+        "LLM_BASE_URL",
+        ""
+    )
+
+    default_model_name = st.secrets.get(
+        "LLM_MODEL_NAME",
+        ""
+    )
+
+    default_api_key = st.secrets.get(
+        "LLM_API_KEY",
+        ""
+    )
+
+    llm_base_url = st.text_input(
+        "LLM API base URL",
+        value=default_base_url,
+        placeholder="Example: https://api.openai.com/v1"
+    )
+
+    llm_model_name = st.text_input(
+        "LLM model name",
+        value=default_model_name,
+        placeholder="Example: gpt-4o-mini or provider-model-name"
+    )
+
+    llm_api_key = st.text_input(
+        "LLM API key",
+        value=default_api_key,
+        type="password"
+    )
+
+    llm_temperature = st.slider(
+        "LLM temperature",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.2,
+        step=0.1
+    )
+
 
     # this button is used to run the context engineering analysis
     run_button = st.button(
@@ -409,14 +456,6 @@ if run_button:
             embedding_model_name
         )
 
-        """
-        STEP 1:
-        Run raw vector retrieval first.
-
-        This version stays available in:
-        st.session_state.raw_vector_results
-        """
-
         st.session_state.raw_vector_results = retrieve_top_k(
             query=question,
             child_chunks=st.session_state.child_chunks,
@@ -425,15 +464,6 @@ if run_button:
             top_k=raw_top_k
         )
 
-        """
-        STEP 2:
-        Run cross-encoder re-ranking on the raw vector results.
-
-        This creates a new version:
-        st.session_state.reranked_results
-
-        It does not remove or overwrite raw_vector_results.
-        """
 
         reranker_model = get_cached_reranker_model(
             reranker_model_name
@@ -465,6 +495,41 @@ if run_button:
             naive_context=st.session_state.naive_context,
             engineered_context=st.session_state.engineered_context
         )
+
+        """
+        Generate the naive answer.
+
+        This answer uses naive_context.
+        It is kept separate for comparison.
+        """
+
+        st.session_state.naive_answer = generate_answer(
+            question=question,
+            context=st.session_state.naive_context,
+            mode="Naive RAG",
+            api_key=llm_api_key,
+            base_url=llm_base_url,
+            model_name=llm_model_name,
+            temperature=llm_temperature
+        )
+
+        """
+        Generate the engineered context answer.
+
+        This answer uses engineered_context.
+        It is kept separate from the naive answer.
+        """
+
+        st.session_state.engineered_answer = generate_answer(
+            question=question,
+            context=st.session_state.engineered_context,
+            mode="Engineered Context Retrieval",
+            api_key=llm_api_key,
+            base_url=llm_base_url,
+            model_name=llm_model_name,
+            temperature=llm_temperature
+        )
+
 
         st.success(
             "Raw vector retrieval and cross-encoder re-ranking completed. "
@@ -918,10 +983,10 @@ with tab_3:
     left_col, right_col = st.columns(2)
 
     with left_col:
-        st.subheader("Naive RAG Context Version")
+        st.subheader("Naive RAG Answer")
 
-        if st.session_state.naive_context:
-            st.success("Naive context created from raw vector results.")
+        if st.session_state.naive_answer:
+            st.write(st.session_state.naive_answer)
 
             st.metric(
                 "Naive Context Tokens",
@@ -937,14 +1002,14 @@ with tab_3:
                 )
         else:
             st.info(
-                "Naive context will appear after running retrieval analysis."
+                "Naive answer will appear after running the full analysis."
             )
 
     with right_col:
-        st.subheader("Engineered Context Version")
+        st.subheader("Engineered Context Answer")
 
-        if st.session_state.engineered_context:
-            st.success("Engineered context created from selected re-ranked parent chunks.")
+        if st.session_state.engineered_answer:
+            st.write(st.session_state.engineered_answer)
 
             st.metric(
                 "Engineered Context Tokens",
@@ -960,7 +1025,7 @@ with tab_3:
                 )
         else:
             st.info(
-                "Engineered context will appear after running re-ranking analysis."
+                "Engineered answer will appear after running the full analysis."
             )
 
     st.divider()
