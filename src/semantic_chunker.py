@@ -1,4 +1,6 @@
 import re
+from sklearn.metrics.pairwise import cosine_similarity
+
 
 def split_into_sentences(text):
     # output a list of dictionaries
@@ -67,3 +69,58 @@ def split_into_sentences(text):
 
     # return the list of dictionaries
     return sentences
+
+
+
+
+def calculate_sentence_distances(sentences, embeddings):
+    """
+    STEP 1:
+    Calculate semantic distance between neighbouring sentences.
+
+    Example:
+    - Compare sentence 1 with sentence 2
+    - Compare sentence 2 with sentence 3
+    - Compare sentence 3 with sentence 4
+
+    Why:
+    If two neighbouring sentences are similar, the topic is probably continuing.
+    If two neighbouring sentences are very different, the topic may have changed.
+
+    cosine_similarity:
+    Value close to 1 means very similar.
+    Value close to 0 means less similar.
+
+    cosine_distance:
+    distance = 1 - similarity
+
+    Higher distance = bigger meaning shift.
+    """
+
+    distances = []
+
+    if len(sentences) < 2:
+        return distances
+    
+    for index in range(len(sentences) - 1):
+        current_embedding = embeddings[index].reshape(1, -1) # reshape to 1D array
+        next_embedding = embeddings[index + 1].reshape(1, -1) # reshape to 1D array
+        similarity = cosine_similarity(current_embedding, next_embedding)[0][0] #[0][0] because it returns a 2D array
+        
+        distance = 1 - similarity
+
+        distances.append(
+            {
+                "sentence_id_current": sentences[index]["sentence_id"],
+                "sentence_id_next": sentences[index + 1]["sentence_id"],
+                "cosine_similarity": round(float(similarity), 4),
+                "cosine_distance": round(float(distance), 4),
+                "current_sentence_preview": sentences[index]["text"][:120],
+                "next_sentence_preview": sentences[index + 1]["text"][:120],
+            }
+        )
+
+    # return the list of dictionaries
+    return distances
+
+

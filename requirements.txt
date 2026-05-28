@@ -2,3 +2,6 @@ streamlit
 pandas
 numpy
 pymupdf
+sentence-transformers
+scikit-learn
+torchvision

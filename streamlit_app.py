@@ -1,11 +1,13 @@
 from numpy import percentile
 import streamlit as st
+import pandas as pd
 
 from src.document_loader import load_uploaded_document
 from src.text_cleaner import clean_text
 from src.naive_chunker import naive_chunk_text
 from src.semantic_chunker import split_into_sentences
-
+from src.embeddings import load_embedding_model, embed_texts
+from src.semantic_chunker import calculate_sentence_distances
 
 
 st.set_page_config(
@@ -51,6 +53,27 @@ if "metrics" not in st.session_state:
         "tokens_saved_percent": 0,#percentage of tokens saved by engineered context
         "context_reduction_percent": 0,#percentage of context reduction by engineered context
     }
+
+if "sentence_embeddings" not in st.session_state:
+    st.session_state.sentence_embeddings = []
+
+if "sentence_distances" not in st.session_state:
+    st.session_state.sentence_distances = []
+
+
+
+#cache the embedding model
+@st.cache_resource
+def get_cached_embedding_model(model_name: str):
+    """
+    Why:
+    Loading ML models can be slow.
+    st.cache_resource keeps the model in memory after first load.
+    """
+
+    return load_embedding_model(model_name)
+
+
 
 #title and description
 st.title("Advanced Context Engineering Harness")
@@ -142,7 +165,6 @@ with st.sidebar:
     run_button = st.button(
         "Run Context Engineering Analysis  ",
         type="primary",
-        use_container_width=True
     )
 
     if uploaded_file is not None:
@@ -166,6 +188,13 @@ if uploaded_file is not None:
             overlap= naive_chunk_overlap
         )
         st.session_state.sentences = split_into_sentences(st.session_state.document_text)
+
+        if st.session_state.sentences:
+            sentence_texts = [sentence["text"] for sentence in st.session_state.sentences]
+            embedding_model = get_cached_embedding_model(embedding_model_name)
+            st.session_state.sentence_embeddings = embed_texts(sentence_texts, embedding_model)
+            st.session_state.sentence_distances = calculate_sentence_distances(st.session_state.sentences, st.session_state.sentence_embeddings)
+
 
     except Exception as e:
         st.error(f"Document extraction or chunking failed: {e}")
@@ -299,10 +328,31 @@ with tab_1:
         st.info("No sentences available.")
         st.info("Upload a document to generate sentence-level units.")
 
-    st.info(
-        "Coming next: sentence embeddings, cosine distance, semantic breakpoints, "
-        "and chunk visualization."
-    )
+    st.divider()
+    st.subheader("Sentence - to - Sentence Cosine Distance Preview")
+    if st.session_state.sentence_distances:
+        distance_df = pd.DataFrame(st.session_state.sentence_distances)
+        st.dataframe(distance_df,
+        use_container_width=True,
+        hide_index=True,
+        )
+
+        st.subheader("Semantic Distance Spike Chart") # plot the cosine distance values
+        
+        char_df = distance_df[[
+            "sentence_id_current",
+            "cosine_distance"
+        ]].set_index("sentence_id_current")
+        st.line_chart(char_df)
+
+        st.info(
+            "Higher spikes mean neighbouring sentences are less similar. "
+            "In the next step, we will use these spikes as semantic breakpoints."
+        )
+    else:
+        st.info(
+            "Upload a document to calculate sentence embeddings and semantic distances."
+        )
 
 
 
