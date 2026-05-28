@@ -1,0 +1,8 @@
+# Streamlit's file watcher introspects imported packages. With sentence-transformers
+# that pulls in transformers, which logs hundreds of lazy __path__ advisories.
+# Use "poll" or "auto" if you want hot reload and can tolerate the log noise.
+[server]
+fileWatcherType = "none"
+
+[logger]
+level = "error"

@@ -1,14 +1,26 @@
-from numpy import percentile
-import streamlit as st
+import logging
+import os
+import warnings
+
+# Suppress Hugging Face advisory noise when Streamlit inspects lazy transformers submodules.
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+logging.getLogger("transformers").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", message=r"Accessing `__path__` from")
+
 import pandas as pd
+import streamlit as st
 
 from src.document_loader import load_uploaded_document
 from src.text_cleaner import clean_text
 from src.naive_chunker import naive_chunk_text
-from src.semantic_chunker import split_into_sentences
 from src.embeddings import load_embedding_model, embed_texts
-from src.semantic_chunker import calculate_sentence_distances
-
+from src.semantic_chunker import (
+    split_into_sentences,
+    calculate_sentence_distances,
+    find_semantic_breakpoints,
+    build_semantic_chunks
+)
 
 st.set_page_config(
     page_title="Advanced Context Engineering Harness",
@@ -60,6 +72,11 @@ if "sentence_embeddings" not in st.session_state:
 if "sentence_distances" not in st.session_state:
     st.session_state.sentence_distances = []
 
+if "semantic_breakpoints" not in st.session_state:
+    st.session_state.semantic_breakpoints = []
+
+if "semantic_chunks" not in st.session_state:
+    st.session_state.semantic_chunks = []
 
 
 #cache the embedding model
@@ -142,7 +159,7 @@ with st.sidebar:
     threshold_mode = st.selectbox(
         "Semantic threshold mode",
         [
-            "prcentile",
+            "percentile",
             "standard_deviation"
         ]
    )
@@ -194,8 +211,14 @@ if uploaded_file is not None:
             embedding_model = get_cached_embedding_model(embedding_model_name)
             st.session_state.sentence_embeddings = embed_texts(sentence_texts, embedding_model)
             st.session_state.sentence_distances = calculate_sentence_distances(st.session_state.sentences, st.session_state.sentence_embeddings)
-
-
+            st.session_state.semantic_breakpoints = find_semantic_breakpoints(
+                distances = st.session_state.sentence_distances, 
+                mode = threshold_mode
+            )
+            st.session_state.semantic_chunks = build_semantic_chunks(
+                sentences=st.session_state.sentences,
+                breakpoints=st.session_state.semantic_breakpoints,
+            )
     except Exception as e:
         st.error(f"Document extraction or chunking failed: {e}")
         st.session_state.document_text = ""
@@ -314,15 +337,17 @@ with tab_1:
     st.header("Sentence Splitting Preview")
     if st.session_state.sentences:
         sentence_preview = st.session_state.sentences[:20]
-        st.dataframe(sentence_preview,
-        use_container_width=True,
-        hide_index=True,
+        st.dataframe(
+            sentence_preview,
+            width="stretch",
+            hide_index=True,
         )
 
         with st.expander("View all extracted sentences"):
-            st.dataframe(st.session_state.sentences,
-            use_container_width=True,
-            hide_index=True,
+            st.dataframe(
+                st.session_state.sentences,
+                width="stretch",
+                hide_index=True,
             )
     else:
         st.info("No sentences available.")
@@ -333,7 +358,7 @@ with tab_1:
     if st.session_state.sentence_distances:
         distance_df = pd.DataFrame(st.session_state.sentence_distances)
         st.dataframe(distance_df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         )
 
@@ -354,6 +379,50 @@ with tab_1:
             "Upload a document to calculate sentence embeddings and semantic distances."
         )
 
+    st.divider()
+    st.subheader("Detected Semantic Breakpoints")
+    if st.session_state.semantic_breakpoints:
+        st.write(f"Detected {len(st.session_state.semantic_breakpoints)} semantic breakpoints.")
+        st.code(st.session_state.semantic_breakpoints)
+    else:
+        st.info("No semantic breakpoints detected.")
+        st.info("Upload a document to calculate sentence embeddings and semantic distances.")
+    
+    st.divider()
+    st.subheader("Final Semantic Chunks")
+    if st.session_state.semantic_chunks:
+        #make it as a table
+        semantic_chunk_table = []
+        for chunk in st.session_state.semantic_chunks:
+            semantic_chunk_table.append(
+                {
+                    "chunk_id": chunk["chunk_id"],
+                    "sentence_start": chunk["sentence_start"],
+                    "sentence_end": chunk["sentence_end"],
+                    "char_start": chunk["char_start"],
+                    "char_end": chunk["char_end"],
+                    "text_preview": chunk["text"][:200],
+                }
+            )
+        
+        st.dataframe(
+            semantic_chunk_table,
+            width="stretch",
+            hide_index=True,
+        )
+
+        with st.expander("View all semantic chunks"):
+            for chunk in st.session_state.semantic_chunks:
+                st.markdown(f"**Chunk {chunk['chunk_id']}**")
+                st.caption(
+                    f"Sentence {chunk['sentence_start']} to {chunk['sentence_end']}"
+                    f" - Characters {chunk['char_start']} to {chunk['char_end']}"
+                )
+                st.write(chunk['text'])
+                 
+                st.divider()
+    else:
+        st.info("Semantic chunks will appear here after document processing.")
 
 
 # ============================================================
