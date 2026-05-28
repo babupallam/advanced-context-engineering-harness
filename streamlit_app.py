@@ -22,7 +22,7 @@ from src.semantic_chunker import (
     build_semantic_chunks
 )
 from src.metadata_anchor import create_document_metadata, attach_metadata_to_chunks, build_embedding_texts
-
+from src.parent_child import create_parent_child_chunks, build_child_embedding_text
 
 st.set_page_config(
     page_title="Advanced Context Engineering Harness",
@@ -82,6 +82,11 @@ if "semantic_chunks" not in st.session_state:
 
 if "document_metadata" not in st.session_state:
     st.session_state.document_metadata = {}
+if "parent_chunks" not in st.session_state:
+    st.session_state.parent_chunks = []
+if "child_chunks" not in st.session_state:
+    st.session_state.child_chunks = []
+
 
 
 #cache the embedding model
@@ -183,6 +188,27 @@ with st.sidebar:
         value=4,
         step=1
     )
+
+    st.divider()
+
+    st.subheader("Parent-Child Settings")
+
+    child_max_words = st.number_input(
+        "Child chunk max words",
+        min_value=80,
+        max_value=500,
+        value=220,
+        step=20
+    )
+
+    child_overlap_words = st.number_input(
+        "Child chunk overlap words",
+        min_value=0,
+        max_value=150,
+        value=40,
+        step=10
+    )
+
     # this button is used to run the context engineering analysis
     run_button = st.button(
         "Run Context Engineering Analysis  ",
@@ -227,10 +253,21 @@ if uploaded_file is not None:
                 distances = st.session_state.sentence_distances, 
                 mode = threshold_mode
             )
-            st.session_state.semantic_chunks = build_semantic_chunks(
+            
+            semantic_chunks = build_semantic_chunks(
                 sentences=st.session_state.sentences,
                 breakpoints=st.session_state.semantic_breakpoints,
             )
+            st.session_state.semantic_chunks = attach_metadata_to_chunks(semantic_chunks, st.session_state.document_metadata)
+
+            parent_chunks, child_chunks = create_parent_child_chunks(
+                semantic_chunks=st.session_state.semantic_chunks,
+                child_max_words=child_max_words,
+                child_overlap_words=child_overlap_words
+            )
+            st.session_state.parent_chunks = parent_chunks
+            st.session_state.child_chunks = child_chunks
+            
     except Exception as e:
         st.error(f"Document extraction or chunking failed: {e}")
         st.session_state.document_text = ""
@@ -334,7 +371,7 @@ with tab_1:
         "instead of fixed character counts."
     )
 
-    col_a, col_b, col_c = st.columns(3)
+    col_a, col_b, col_c, col_d, col_e, col_f = st.columns(6)
 
     with col_a:
         st.metric("Total Sentences", len(st.session_state.sentences))
@@ -344,6 +381,16 @@ with tab_1:
 
     with col_c:
         st.metric("Semantic Chunk Count", len(st.session_state.semantic_chunks))
+
+    with col_d:
+        st.metric("Breakpoints", len(st.session_state.semantic_breakpoints))
+
+    with col_e:
+        st.metric("Parent Chunk Count", len(st.session_state.parent_chunks))
+
+    with col_f:
+        st.metric("Child Chunk Count", len(st.session_state.child_chunks))
+
 
     st.divider()
     st.header("Sentence Splitting Preview")
@@ -450,8 +497,77 @@ with tab_1:
                 st.write(chunk['text'])
                  
                 st.divider()
+
     else:
         st.info("Semantic chunks will appear here after document processing.")
+
+    st.divider()
+    st.subheader("Parent-Child Retrieval Version")
+    st.write(
+        "This section keeps semantic chunks as parent chunks and creates smaller "
+        "child chunks for precise retrieval. The previous naive and semantic versions "
+        "are still kept for comparison."
+    )
+
+    if st.session_state.parent_chunks and st.session_state.child_chunks:
+        parent_chunk_table = []
+        for chunk in st.session_state.parent_chunks:
+            related_children = [
+                child for child in st.session_state.child_chunks if child["parent_id"] == chunk["parent_id"]
+            ]
+            parent_chunk_table.append(
+                {
+                    "parent_id": chunk["parent_id"],
+                    "source_semantic_chunk_id": chunk["source_semantic_chunk_id"],
+                    "sentence_start": chunk["sentence_start"],
+                    "sentence_end": chunk["sentence_end"],
+                    "child_count": len(related_children),
+                    "parent_preview": chunk["parent_text"][:180],
+                }
+            )
+        st.dataframe(
+            parent_chunk_table, 
+            width="stretch", 
+            hide_index=True)
+        
+        with st.expander("View all parent chunks"):
+            for chunk in st.session_state.parent_chunks:
+                st.markdown(f"**Parent Chunk {chunk['parent_id']}**")
+                st.caption(f"From Semantic Chunk {chunk['source_semantic_chunk_id']} - Sentence {chunk['sentence_start']} to {chunk['sentence_end']}")
+                st.write(chunk['parent_text'])
+                st.divider()
+
+        child_chunk_table = []
+        for chunk in st.session_state.child_chunks:
+            child_chunk_table.append(
+                {
+                    "child_id": chunk["child_id"],
+                    "parent_id": chunk["parent_id"],
+                    "word_start": chunk["word_start"],
+                    "word_end": chunk["word_end"],
+                    "source_semantic_chunk_id": chunk["source_semantic_chunk_id"],
+                    "child_preview": chunk["child_text"][:180],
+                }
+            )
+
+        st.subheader("Child Chunk Preview")
+        st.dataframe(
+            child_chunk_table,
+            width="stretch",
+            hide_index=True,
+        )
+        with st.expander("View Sample Child Embedding Text"):
+            sample_chunk = st.session_state.child_chunks[0]
+            st.text(build_child_embedding_text(sample_chunk))
+
+        with st.expander("View all child chunks"):
+            for chunk in st.session_state.child_chunks:
+                st.markdown(f"**Child Chunk {chunk['child_id']}**")
+                st.caption(f"From Parent Chunk {chunk['parent_id']} - Words {chunk['word_start']} to {chunk['word_end']}")
+                st.write(chunk['child_text'])
+                st.divider()
+    else:
+        st.info("Parent-child chunks will appear here after semantic chunks are processed.")
 
 
 # ============================================================
@@ -516,9 +632,51 @@ with tab_3:
             st.caption("No naive chunks available.")            
             st.info("Upload a document to generate naive chunks.")
 
-    st.info(
-        "Coming next: sentence splitting for semantic chunking."
-    )
+    st.divider()
+    with st.expander("Compare Available Chunking Versions"):
+        st.markdown("### Version 1: Naive Fixed-Size Chunks")
 
+        st.write(
+            "Used as the baseline. It splits by character count and may cut ideas."
+        )
+
+        st.metric(
+            "Naive Chunk Count",
+            len(st.session_state.naive_chunks)
+        )
+
+        st.markdown("### Version 2: Semantic Chunks")
+
+        st.write(
+            "Uses sentence distance spikes to split around meaning shifts."
+        )
+
+        st.metric(
+            "Semantic Chunk Count",
+            len(st.session_state.semantic_chunks)
+        )
+
+        st.markdown("### Version 3: Parent-Child Retrieval Chunks")
+
+        st.write(
+            "Uses semantic chunks as larger parent context and smaller child chunks "
+            "for precise search."
+        )
+
+        col_parent, col_child = st.columns(2)
+
+        with col_parent:
+            st.metric(
+                "Parent Chunk Count",
+                len(st.session_state.parent_chunks)
+            )
+
+        with col_child:
+            st.metric(
+                "Child Chunk Count",
+                len(st.session_state.child_chunks)
+            )
+
+    
 
 

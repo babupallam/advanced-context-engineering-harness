@@ -17,6 +17,5 @@ venv/
 env/
 
 *.pyc
-src/__pycache__/
-
+src/__pycache__/*
 
