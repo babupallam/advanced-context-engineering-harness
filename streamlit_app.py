@@ -23,6 +23,7 @@ from src.semantic_chunker import (
 )
 from src.metadata_anchor import create_document_metadata, attach_metadata_to_chunks, build_embedding_texts
 from src.parent_child import create_parent_child_chunks, build_child_embedding_text
+from src.vector_store import build_vector_index, retrieve_top_k
 
 st.set_page_config(
     page_title="Advanced Context Engineering Harness",
@@ -86,7 +87,10 @@ if "parent_chunks" not in st.session_state:
     st.session_state.parent_chunks = []
 if "child_chunks" not in st.session_state:
     st.session_state.child_chunks = []
-
+if "vector_index" not in st.session_state:
+    st.session_state.vector_index = {}
+if "raw_vector_results" not in st.session_state:
+    st.session_state.raw_vector_results = []
 
 
 #cache the embedding model
@@ -267,6 +271,13 @@ if uploaded_file is not None:
             )
             st.session_state.parent_chunks = parent_chunks
             st.session_state.child_chunks = child_chunks
+
+
+            if st.session_state.child_chunks:
+                st.session_state.vector_index = build_vector_index(
+                    child_chunks=st.session_state.child_chunks,
+                    embedding_model=embedding_model
+                )
             
     except Exception as e:
         st.error(f"Document extraction or chunking failed: {e}")
@@ -339,8 +350,29 @@ if run_button:
         st.warning("Please upload a document first.")
     elif not question.strip():
         st.warning("Please enter a question first.")
+    elif not st.session_state.child_chunks:
+        st.warning(
+            "Child chunks are not available yet. Upload a document and make sure "
+            "semantic chunking and parent-child retrieval were created."
+        )  
+    elif not st.session_state.vector_index:
+        st.warning(
+            "Vector index is not available yet. Re-upload the document to build the index."
+        )
     else:
-        st.warning("Document extraction is working. The next step will add naive chunking.")
+        embedding_model = get_cached_embedding_model(
+            embedding_model_name
+        )
+        st.session_state.raw_vector_results = retrieve_top_k(
+            query=question,
+            child_chunks=st.session_state.child_chunks,
+            index=st.session_state.vector_index,
+            embedding_model=embedding_model,
+            top_k=raw_top_k
+        )
+        st.success(
+            "Raw vector retrieval completed. Open Tab 2 to review the top vector hits."
+        )
             
 
 # Three tabs for displaying different aspects of the context engineering process
@@ -581,13 +613,77 @@ with tab_1:
 
 with tab_2:
     st.header("Re-ranker Analytics")
-    st.write("This tab will compare raw vector retrieval results against deeper "
-        "cross-encoder re-ranking results.")
-    st.info(
-        "Coming next: re-ranker model selection, re-ranker threshold mode, "
-        "re-ranker top-k results, and re-ranker final top-n results."
+
+    st.write(
+        "This tab now shows raw vector retrieval results from the parent-child version. "
+        "The app searches child chunks for precision while keeping parent text for later context."
     )
 
+    st.divider()
+
+    st.subheader("Raw Vector Search Results")
+
+    if st.session_state.raw_vector_results:
+        raw_results_table = []
+
+        for result in st.session_state.raw_vector_results:
+            raw_results_table.append(
+                {
+                    "raw_rank": result["raw_rank"],
+                    "child_id": result["child_id"],
+                    "parent_id": result["parent_id"],
+                    "semantic_chunk": result["source_semantic_chunk_id"],
+                    "vector_similarity": result["vector_similarity"],
+                    "chunk_preview": result["chunk_preview"],
+                }
+            )
+
+        st.dataframe(
+            raw_results_table,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.divider()
+
+        st.subheader("Raw Vector Hit Details")
+
+        for result in st.session_state.raw_vector_results:
+            with st.expander(
+                f"Raw Rank {result['raw_rank']} | "
+                f"Similarity {result['vector_similarity']} | "
+                f"{result['child_id']}"
+            ):
+                st.markdown("#### Searchable Child Text")
+                st.write(result["child_text"])
+
+                st.markdown("#### Parent Text Kept for Later Context")
+                st.write(result["parent_text"])
+
+                st.markdown("#### Metadata")
+                st.json(
+                    {
+                        "file_name": result["file_name"],
+                        "parent_id": result["parent_id"],
+                        "child_id": result["child_id"],
+                        "source_semantic_chunk_id": result["source_semantic_chunk_id"],
+                        "source_type": result["source_type"],
+                    }
+                )
+
+        st.divider()
+
+        st.info(
+            "Next step: add a cross-encoder re-ranker. Vector search is fast, "
+            "but it can still rank shallow matches too highly. The re-ranker will "
+            "score the question and chunk together."
+        )
+
+    else:
+        st.info(
+            "Run the analysis after uploading a document and entering a question. "
+            "Raw vector results will appear here."
+        )
 
 
 # ============================================================
@@ -676,7 +772,18 @@ with tab_3:
                 "Child Chunk Count",
                 len(st.session_state.child_chunks)
             )
+        
+        st.markdown("### Version 4: Raw Vector Retrieval Results")
 
-    
+        st.write(
+            "Uses the user question to search child chunks by embedding similarity. "
+            "This is the candidate generation stage before re-ranking."
+        )
+
+        st.metric(
+            "Raw Vector Results",
+            len(st.session_state.raw_vector_results)
+        )
+
 
 
