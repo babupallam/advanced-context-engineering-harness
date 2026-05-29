@@ -225,6 +225,61 @@ def show_pipeline_defaults_expander(pipeline_defaults):
             )
 
 
+def context_chunk_label(chunk_text, index=0):
+    """
+    Derive a short expander title from a formatted context chunk block.
+    """
+
+    text = chunk_text.strip()
+    if not text:
+        return f"Chunk {index + 1}"
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip()
+        value = value.strip()
+        if key == "Child ID":
+            return value
+        if key in ("Parent ID", "Parent ID Matched"):
+            return f"{key}: {value}"
+        if key == "Raw Rank":
+            return f"Rank {value}"
+        if key == "Rerank Position":
+            return f"Rerank #{value}"
+
+    first_line = text.splitlines()[0].strip().strip("[]")
+    return first_line or f"Chunk {index + 1}"
+
+
+def show_context_with_chunk_expanders(title, context_text):
+    """
+    Show assembled LLM context split into per-chunk expanders.
+    """
+
+    with st.expander(title):
+        if not context_text or not context_text.strip():
+            st.info("Context will appear after running the full analysis.")
+            return
+
+        chunks = [
+            chunk.strip()
+            for chunk in context_text.split("\n\n---\n\n")
+            if chunk.strip()
+        ]
+
+        if not chunks:
+            st.text(context_text)
+            return
+
+        for index, chunk in enumerate(chunks):
+            label = context_chunk_label(chunk, index)
+            with st.expander(f"Chunk {index + 1}: {label}"):
+                st.text(chunk)
+
+
 def show_chunk_card(title, caption, text):
     """
     Reusable chunk display card.

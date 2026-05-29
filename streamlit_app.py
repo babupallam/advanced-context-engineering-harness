@@ -58,6 +58,7 @@ from src.ui.ui_components import (
     show_pipeline_defaults_expander,
     show_formula_hint,
     show_llm_token_estimate_column,
+    show_context_with_chunk_expanders,
 )
 
 
@@ -1129,24 +1130,14 @@ with tab_3:
     context_col_1, context_col_2 = st.columns(2)
 
     with context_col_1:
-        with st.expander("Naive RAG Context"):
-            st.text_area(
-                "Naive Context",
-                value=st.session_state.naive_context,
-                height=400,
-                disabled=True,
-                label_visibility="collapsed",
-            )
+        show_context_with_chunk_expanders(
+            "Naive RAG Context", st.session_state.naive_context
+        )
 
     with context_col_2:
-        with st.expander("Engineered Context"):
-            st.text_area(
-                "Engineered Context",
-                value=st.session_state.engineered_context,
-                height=400,
-                disabled=True,
-                label_visibility="collapsed",
-            )
+        show_context_with_chunk_expanders(
+            "Engineered Context", st.session_state.engineered_context
+        )
 
     st.divider()
 
@@ -1212,18 +1203,18 @@ with tab_3:
         "context text, user question, generated answer, and provider-side overhead. "
         "The provider dashboard is the source of truth for actual API usage or billing."
     )
-
-    with st.expander("Why provider token usage may be higher"):
-        st.markdown(
-            """
-- **This app** uses tiktoken for counting, falling back to `cl100k_base` when the selected model is unknown.
-- **Your LLM provider** uses the actual tokenizer for the selected model, so counts often differ.
-- **Two API calls** are made: one for the naive RAG answer and one for the engineered-context answer. Provider usage usually includes both.
-- **Each call sends** the user question, retrieved context, a system/instruction message (we estimate ~100 tokens), and the model's generated answer.
-- **Provider dashboards** typically report **input tokens** (prompt + context + system) and **output tokens** (the answer) separately, then sum them for billing.
-- **Long retrieved contexts** can make provider input usage much larger than answer-only counts shown in the UI.
-            """
-        )
+    
+    #with st.expander("Why provider token usage may be higher"):
+    #    st.markdown(
+    #        """
+#- **This app** uses tiktoken for counting, falling back to `cl100k_base` when the selected model is unknown.
+#- **Your LLM provider** uses the actual tokenizer for the selected model, so counts often differ.
+#- **Two API calls** are made: one for the naive RAG answer and one for the engineered-context answer. Provider usage usually includes both.
+#- **Each call sends** the user question, retrieved context, a system/instruction message (we estimate ~100 tokens), and the model's generated answer.
+#- **Provider dashboards** typically report **input tokens** (prompt + context + system) and **output tokens** (the answer) separately, then sum them for billing.
+#- **Long retrieved contexts** can make provider input usage much larger than answer-only counts shown in the UI.
+#        """
+#        )
 
     st.divider()
 
