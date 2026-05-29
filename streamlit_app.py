@@ -57,6 +57,10 @@ from src.evaluation.process_logger import (
     log_process_event,
 )
 from src.evaluation.similarity_analysis import calculate_chunk_similarity_matrix
+from src.pipeline_registry import (
+    get_pipeline_stages,
+    get_stage_summary_table,
+)
 from src.ui.ui_components import (
     PIPELINE_MODE_OPTIONS,
     show_pipeline_summary,
@@ -904,6 +908,43 @@ with tab_overview:
 
     with overview_col_3:
         st.metric("Re-ranked Results", len(st.session_state.reranked_results))
+
+    st.divider()
+
+    st.subheader("Workbench Stage Registry")
+    st.caption(
+        "Stage-by-stage map from naive RAG through advanced retrieval, prompting, "
+        "evaluation, and observability. Use this during demos to explain how the "
+        "project evolved."
+    )
+
+    st.dataframe(
+        get_stage_summary_table(),
+        width="stretch",
+        hide_index=True,
+    )
+
+    st.subheader("Stage Details")
+    st.caption("Expand any stage to see techniques, data flow, and interview talking points.")
+
+    for step_number, stage in enumerate(get_pipeline_stages(), start=1):
+        expander_label = f"Step {step_number}: {stage['stage_name']}"
+
+        with st.expander(expander_label):
+            st.markdown(stage["description"])
+
+            st.markdown("**Techniques used**")
+            for technique in stage["techniques_used"]:
+                st.markdown(f"- {technique}")
+
+            st.markdown("**Input data**")
+            st.write(stage["input_data"])
+
+            st.markdown("**Output data**")
+            st.write(stage["output_data"])
+
+            st.markdown("**Employer / interview signal**")
+            st.info(stage["employer_skill_signal"])
 
 # ============================================================
 # TAB 2: CHUNKING LAB (SEMANTIC CHUNK MAP)
