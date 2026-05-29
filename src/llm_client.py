@@ -92,7 +92,7 @@ def generate_answer(question,context,mode,api_key,base_url,model_name,temperatur
         return "Base URL is missing. Add LLM_BASE_URL to .streamlit/secrets.toml."
 
     if not model_name:
-        return "Model name is missing. Add LLM_MODEL_NAME to .streamlit/secrets.toml."
+        return "Model name is missing. Select a model in the sidebar."
 
     client = OpenAI(
         api_key=api_key,

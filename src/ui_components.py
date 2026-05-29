@@ -9,11 +9,7 @@ import streamlit as st
 
 def show_pipeline_summary():
     """
-    STEP 1:
-    Show the high-level pipeline comparison.
-
-    Why:
-    This helps interviewers quickly understand what your app is comparing.
+    Show the high-level two-pipeline comparison.
     """
 
     st.markdown("### Pipeline Summary")
@@ -21,16 +17,18 @@ def show_pipeline_summary():
     col_1, col_2 = st.columns(2)
 
     with col_1:
-        st.markdown("#### Naive RAG")
+        st.markdown("#### Naive RAG Pipeline")
         st.info(
-            "Fixed chunks → vector search → raw top chunks → LLM answer"
+            "Fixed-size chunks → vector retrieval → direct context building → "
+            "answer generation"
         )
 
     with col_2:
-        st.markdown("#### Engineered Context")
+        st.markdown("#### Engineered Context Pipeline")
         st.success(
-            "Semantic chunks → metadata anchoring → parent-child retrieval → "
-            "vector search → cross-encoder re-ranking → compact context → LLM answer"
+            "Sentence splitting → semantic chunking → metadata anchoring → "
+            "parent-child retrieval → vector retrieval → cross-encoder re-ranking → "
+            "engineered context → answer generation"
         )
 
     st.divider()
@@ -38,31 +36,27 @@ def show_pipeline_summary():
 
 def show_metric_cards(metrics):
     """
-    STEP 1:
-    Show token-efficiency metric cards.
-
-    Why:
-    Metrics make the project look measurable instead of just visual.
+    Show approximate token-efficiency metric cards.
     """
 
     metric_col_1, metric_col_2, metric_col_3, metric_col_4, metric_col_5 = st.columns(5)
 
     with metric_col_1:
         st.metric(
-            label="Full Document Tokens",
-            value=metrics.get("full_document_tokens", 0)
+            label="Approx. Full Document Tokens",
+            value=metrics.get("full_document_tokens", 0),
         )
 
     with metric_col_2:
         st.metric(
-            label="Naive Context Tokens",
-            value=metrics.get("naive_context_tokens", 0)
+            label="Approx. Naive Context Tokens",
+            value=metrics.get("naive_context_tokens", 0),
         )
 
     with metric_col_3:
         st.metric(
-            label="Engineered Context Tokens",
-            value=metrics.get("engineered_context_tokens", 0)
+            label="Approx. Engineered Context Tokens",
+            value=metrics.get("engineered_context_tokens", 0),
         )
 
     with metric_col_4:
@@ -80,17 +74,7 @@ def show_metric_cards(metrics):
 
 def show_chunk_card(title, caption, text):
     """
-    STEP 1:
     Reusable chunk display card.
-
-    Why:
-    Chunks appear in many places:
-    - naive chunks
-    - semantic chunks
-    - parent chunks
-    - child chunks
-
-    This function keeps their display consistent.
     """
 
     st.markdown(f"### {title}")
@@ -101,12 +85,7 @@ def show_chunk_card(title, caption, text):
 
 def show_info_box(title, body):
     """
-    STEP 1:
     Reusable explanation box.
-
-    Why:
-    This app is for learning and interviews, so short explanations help
-    users understand each technique.
     """
 
     st.markdown(f"#### {title}")
@@ -115,11 +94,7 @@ def show_info_box(title, body):
 
 def show_warning_for_large_document(document_text):
     """
-    STEP 1:
     Warn the user if the uploaded document is very large.
-
-    Why:
-    Large documents may slow down embedding, re-ranking, and LLM calls.
     """
 
     word_count = len(document_text.split()) if document_text else 0
@@ -134,11 +109,7 @@ def show_warning_for_large_document(document_text):
 
 def show_interview_talking_points():
     """
-    STEP 1:
     Add a final interview guide section.
-
-    Why:
-    This turns the app from a technical demo into a portfolio project.
     """
 
     with st.expander("Interview Talking Points"):
@@ -165,3 +136,15 @@ Vector search is fast but approximate. The cross-encoder reads the question and 
 The system can reduce unnecessary context, improve answer grounding, and make retrieval behaviour easier to inspect.
 """
         )
+
+
+def show_approx_token_disclaimer():
+    """
+    Shared disclaimer for approximate token counts.
+    """
+
+    st.caption(
+        "Token counts shown in this app are approximate. The provider dashboard is "
+        "the source of truth because it uses the selected model's actual tokenizer "
+        "and may include provider-side formatting overhead."
+    )

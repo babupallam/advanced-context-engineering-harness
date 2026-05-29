@@ -30,7 +30,9 @@ from src.context_builder import build_naive_context, build_engineered_context
 from src.metrics import (
     calculate_context_metrics,
     calculate_llm_call_token_estimates,
+    count_approx_tokens,
 )
+from src.model_config import get_provider_model_id
 from src.llm_client import generate_answer
 from src.ui_components import (
     show_pipeline_summary,
@@ -39,6 +41,7 @@ from src.ui_components import (
     show_info_box,
     show_warning_for_large_document,
     show_interview_talking_points,
+    show_approx_token_disclaimer,
 )
 
 
@@ -176,9 +179,9 @@ with st.sidebar:
 
 **What each tab shows**
 
-- **Tab 1 — Semantic Chunk Map:** Sentence splits, cosine-distance spikes, semantic chunks, metadata anchoring, and parent-child structure.
-- **Tab 2 — Re-ranker Analytics:** Raw vector search (Version 4) vs cross-encoder re-ranking (Version 5).
-- **Tab 3 — Naive RAG vs Engineered Context:** Side-by-side answers, token metrics, and all pipeline versions for comparison.
+- **Tab 1 — Engineered Pipeline: Semantic Chunk Map:** Preparation stages before final retrieval (sentence splitting through parent-child structure).
+- **Tab 2 — Engineered Pipeline: Retrieval and Re-ranking Analytics:** Candidate retrieval, cross-encoder re-ranking, and final evidence selection.
+- **Tab 3 — Naive RAG vs Engineered Context:** Side-by-side answers, contexts, token metrics, and pipeline stage review.
             """
         )
 
@@ -300,37 +303,18 @@ with st.sidebar:
 
     st.subheader("LLM Provider Settings")
 
-    default_base_url = st.secrets.get(
-        "LLM_BASE_URL",
-        ""
-    )
-
-    default_model_name = st.secrets.get(
-        "LLM_MODEL_NAME",
-        ""
-    )
-
-    default_api_key = st.secrets.get(
-        "LLM_API_KEY",
-        ""
-    )
-
-    llm_base_url = st.text_input(
-        "LLM API base URL",
-        value=default_base_url,
-        placeholder="Example: https://api.openai.com/v1"
-    )
-
-    llm_model_name = st.text_input(
-        "LLM model name",
-        value=default_model_name,
-        placeholder="Example: gpt-4o-mini or provider-model-name"
-    )
-
-    llm_api_key = st.text_input(
-        "LLM API key",
-        value=default_api_key,
-        type="password"
+    llm_model_display_name = st.selectbox(
+        "LLM model",
+        [
+            "Trinity Mini",
+            "Gemma 4 31B IT",
+            "Llama 3.1 8B",
+            "Meta Llama 3.3 70B Instruct",
+            "GPT OSS 120B",
+            "GPT OSS 20B",
+            "Qwen 3 235B A22B Thinking 2507",
+            "Qwen 3.5 9B",
+        ],
     )
 
     llm_temperature = st.slider(
@@ -338,7 +322,7 @@ with st.sidebar:
         min_value=0.0,
         max_value=1.0,
         value=0.2,
-        step=0.1
+        step=0.1,
     )
 
 
@@ -497,6 +481,19 @@ if run_button:
             engineered_context=st.session_state.engineered_context
         )
 
+        llm_api_key = st.secrets.get("LLM_API_KEY", "")
+        llm_base_url = st.secrets.get("LLM_BASE_URL", "")
+
+        if not llm_api_key:
+            st.error("LLM_API_KEY is missing from Streamlit secrets.")
+            st.stop()
+
+        if not llm_base_url:
+            st.error("LLM_BASE_URL is missing from Streamlit secrets.")
+            st.stop()
+
+        llm_model_name = get_provider_model_id(llm_model_display_name)
+
         # STEP 6: Generate naive answer (uses naive_context; kept separate for comparison)
         st.session_state.naive_answer = generate_answer(
             question=question,
@@ -538,18 +535,15 @@ if run_button:
 
 # Render metrics after the run block so the same rerun shows updated values.
 st.subheader("Approximate Context Efficiency Metrics")
-st.caption(
-    "Context token counts use a word-based approximation (words × 1.3). "
-    "They measure retrieved context size, not full LLM API billing usage."
-)
+show_approx_token_disclaimer()
 show_metric_cards(st.session_state.metrics)
 
 # Three tabs for displaying different aspects of the context engineering process
 tab_1, tab_2, tab_3 = st.tabs(
     [
-        "Semantic Chunk Map",
-        "Re-ranker Analytics",
-        "Naive RAG vs Engineered Context"
+        "Engineered Pipeline: Semantic Chunk Map",
+        "Engineered Pipeline: Retrieval and Re-ranking Analytics",
+        "Naive RAG vs Engineered Context",
     ]
 )
 
@@ -565,11 +559,12 @@ tab_1, tab_2, tab_3 = st.tabs(
 # - final semantic chunks
 
 with tab_1:
-    st.header("Semantic Chunk Map")
+    st.header("Engineered Pipeline: Semantic Chunk Map")
 
     st.write(
-        "This tab will show how the document is split based on meaning shifts "
-        "instead of fixed character counts."
+        "This tab shows the engineered pipeline preparation stages before final "
+        "retrieval: sentence splitting, semantic distance, breakpoints, semantic "
+        "chunks, metadata anchoring, and parent-child structure."
     )
 
     col_a, col_b, col_c, col_d, col_e, col_f = st.columns(6)
@@ -593,10 +588,11 @@ with tab_1:
         st.metric("Child Chunk Count", len(st.session_state.child_chunks))
 
     st.divider()
-    st.subheader("Naive Chunk Preview")
+    st.subheader("Naive RAG Pipeline Reference: Fixed-Size Naive Chunks")
     if st.session_state.naive_chunks:
         st.caption(
-            "Baseline fixed-size chunks (Version 1). Compare these with semantic chunks below."
+            "Baseline fixed-size chunks from the naive RAG pipeline. Compare these "
+            "with engineered semantic chunks below."
         )
         with st.expander("View all naive chunks"):
             for chunk in st.session_state.naive_chunks:
@@ -612,7 +608,7 @@ with tab_1:
         st.info("Naive chunks appear after you upload a document.")
 
     st.divider()
-    st.header("Sentence Splitting Preview")
+    st.subheader("1. Sentence Splitting Stage")
     if st.session_state.sentences:
         sentence_preview = st.session_state.sentences[:20]
         st.dataframe(
@@ -632,16 +628,16 @@ with tab_1:
         st.info("Upload a document to generate sentence-level units.")
 
     st.divider()
-    st.subheader("Sentence - to - Sentence Cosine Distance Preview")
+    st.subheader("2. Semantic Distance Stage")
     if st.session_state.sentence_distances:
         distance_df = pd.DataFrame(st.session_state.sentence_distances)
-        st.dataframe(distance_df,
-        width="stretch",
-        hide_index=True,
+        st.dataframe(
+            distance_df,
+            width="stretch",
+            hide_index=True,
         )
 
-        st.subheader("Semantic Distance Spike Chart") # plot the cosine distance values
-        
+        st.markdown("#### Semantic Distance Spike Chart")
         char_df = distance_df[[
             "sentence_id_current",
             "cosine_distance"
@@ -650,7 +646,7 @@ with tab_1:
 
         st.info(
             "Higher spikes mean neighbouring sentences are less similar. "
-            "In the next step, we will use these spikes as semantic breakpoints."
+            "These spikes become semantic breakpoints in the next stage."
         )
     else:
         st.info(
@@ -658,35 +654,17 @@ with tab_1:
         )
 
     st.divider()
-    st.subheader("Detected Semantic Breakpoints")
+    st.subheader("3. Semantic Breakpoint Stage")
     if st.session_state.semantic_breakpoints:
         st.write(f"Detected {len(st.session_state.semantic_breakpoints)} semantic breakpoints.")
         st.code(st.session_state.semantic_breakpoints)
     else:
         st.info("No semantic breakpoints detected.")
         st.info("Upload a document to calculate sentence embeddings and semantic distances.")
-    
-    st.divider()
-    st.subheader("Metadata Anchoring Preview")
-    if st.session_state.document_metadata:
-        st.json(st.session_state.document_metadata)
-        if st.session_state.semantic_chunks:
-            sample_chunk = st.session_state.semantic_chunks[0]
-            with st.expander("View sample Metadata Anchored Embeddding Text"):
-                st.text(build_embedding_texts(sample_chunk))
-        elif st.session_state.naive_chunks:
-            sample_chunk = st.session_state.naive_chunks[0]
-            with st.expander("View sample Metadata Anchored Embeddding Text"):
-                st.text(build_embedding_texts(sample_chunk))
-        else:
-            st.info("No chunks available to preview metadata anchoring.")
-            st.info("Upload a document to generate chunks and metadata.")
-
 
     st.divider()
-    st.subheader("Final Semantic Chunks")
+    st.subheader("4. Semantic Chunk Stage")
     if st.session_state.semantic_chunks:
-        #make it as a table
         semantic_chunk_table = []
         for chunk in st.session_state.semantic_chunks:
             semantic_chunk_table.append(
@@ -699,7 +677,7 @@ with tab_1:
                     "text_preview": chunk["text"][:200],
                 }
             )
-        
+
         st.dataframe(
             semantic_chunk_table,
             width="stretch",
@@ -721,11 +699,26 @@ with tab_1:
         st.info("Semantic chunks will appear here after document processing.")
 
     st.divider()
-    st.subheader("Parent-Child Retrieval Version")
+    st.subheader("5. Metadata Anchoring Stage")
+    if st.session_state.document_metadata:
+        st.json(st.session_state.document_metadata)
+        if st.session_state.semantic_chunks:
+            sample_chunk = st.session_state.semantic_chunks[0]
+            with st.expander("View sample Metadata Anchored Embeddding Text"):
+                st.text(build_embedding_texts(sample_chunk))
+        elif st.session_state.naive_chunks:
+            sample_chunk = st.session_state.naive_chunks[0]
+            with st.expander("View sample Metadata Anchored Embeddding Text"):
+                st.text(build_embedding_texts(sample_chunk))
+        else:
+            st.info("No chunks available to preview metadata anchoring.")
+            st.info("Upload a document to generate chunks and metadata.")
+
+    st.divider()
+    st.subheader("6. Parent-Child Retrieval Stage")
     st.write(
-        "This section keeps semantic chunks as parent chunks and creates smaller "
-        "child chunks for precise retrieval. The previous naive and semantic versions "
-        "are still kept for comparison."
+        "Semantic chunks become parent chunks; smaller child chunks are created for "
+        "precise vector retrieval while preserving parent context for final answers."
     )
 
     if st.session_state.parent_chunks and st.session_state.child_chunks:
@@ -807,17 +800,17 @@ with tab_1:
 # - final top 3 selected chunks
 
 with tab_2:
-    st.header("Re-ranker Analytics")
+    st.header("Engineered Pipeline: Retrieval and Re-ranking Analytics")
 
     show_info_box(
         "What this tab shows",
-        "Version 4 lists raw vector hits from child-chunk search. Version 5 re-scores "
-        "those candidates with a cross-encoder before the final context is built.",
+        "This tab shows how the engineered pipeline retrieves candidate child chunks "
+        "and re-ranks them before final context construction.",
     )
 
     st.divider()
 
-    st.subheader("Version 4: Raw Vector Search Results")
+    st.subheader("Candidate Retrieval Stage: Raw Vector Search Results")
 
     if st.session_state.raw_vector_results:
         raw_results_table = []
@@ -869,7 +862,7 @@ with tab_2:
 
         st.divider()
 
-        st.subheader("Version 5: Cross-encoder Re-ranker Results")
+        st.subheader("Precision Ranking Stage: Cross-Encoder Re-ranked Results")
         if st.session_state.reranked_results:
             reranked_table = []
 
@@ -905,7 +898,7 @@ with tab_2:
 
     st.divider()
 
-    st.subheader("Final Selected Top Chunks")
+    st.subheader("Final Evidence Selection Stage")
 
     selected_results = get_selected_reranked_results(
         st.session_state.reranked_results
@@ -960,7 +953,7 @@ with tab_2:
 
     st.divider()
 
-    st.subheader("Raw Rank vs Re-ranked Position")
+    st.subheader("Ranking Movement Analysis")
 
     if st.session_state.reranked_results:
         rank_comparison_table = []
@@ -1008,55 +1001,31 @@ with tab_3:
     st.header("Naive RAG vs Engineered Context")
 
     st.write(
-        "This tab compares the baseline naive context against the engineered context. "
-        "All previous versions are kept available for review."
+        "Compare final answers, contexts, approximate token metrics, and a stage-by-stage "
+        "review of both pipelines."
     )
 
     st.divider()
 
+    st.subheader("1. Final Answer Comparison")
+
     left_col, right_col = st.columns(2)
 
     with left_col:
-        st.subheader("Naive RAG Answer")
+        st.markdown("#### Naive RAG Answer")
 
         if st.session_state.naive_answer:
             st.write(st.session_state.naive_answer)
-
-            st.metric(
-                "Naive Context Tokens",
-                st.session_state.metrics["naive_context_tokens"]
-            )
-
-            with st.expander("View Naive Context Used"):
-                st.text_area(
-                    "Naive Context",
-                    value=st.session_state.naive_context,
-                    height=400,
-                    disabled=True
-                )
         else:
             st.info(
                 "Naive answer will appear after running the full analysis."
             )
 
     with right_col:
-        st.subheader("Engineered Context Answer")
+        st.markdown("#### Engineered Context Answer")
 
         if st.session_state.engineered_answer:
             st.write(st.session_state.engineered_answer)
-
-            st.metric(
-                "Engineered Context Tokens",
-                st.session_state.metrics["engineered_context_tokens"]
-            )
-
-            with st.expander("View Engineered Context Used"):
-                st.text_area(
-                    "Engineered Context",
-                    value=st.session_state.engineered_context,
-                    height=400,
-                    disabled=True
-                )
         else:
             st.info(
                 "Engineered answer will appear after running the full analysis."
@@ -1064,7 +1033,40 @@ with tab_3:
 
     st.divider()
 
-    st.subheader("Estimated LLM API Token Usage")
+    st.subheader("2. Context Used for Each Pipeline")
+
+    context_col_1, context_col_2 = st.columns(2)
+
+    with context_col_1:
+        with st.expander("Naive RAG Context"):
+            st.text_area(
+                "Naive Context",
+                value=st.session_state.naive_context,
+                height=400,
+                disabled=True,
+                label_visibility="collapsed",
+            )
+
+    with context_col_2:
+        with st.expander("Engineered Context"):
+            st.text_area(
+                "Engineered Context",
+                value=st.session_state.engineered_context,
+                height=400,
+                disabled=True,
+                label_visibility="collapsed",
+            )
+
+    st.divider()
+
+    st.subheader("3. Approximate Context Efficiency Metrics")
+    show_approx_token_disclaimer()
+    show_metric_cards(st.session_state.metrics)
+
+    st.divider()
+
+    st.subheader("4. Estimated LLM API Token Usage")
+    show_approx_token_disclaimer()
 
     naive_est = st.session_state.naive_llm_token_estimate or {}
     engineered_est = st.session_state.engineered_llm_token_estimate or {}
@@ -1072,32 +1074,32 @@ with tab_3:
     llm_col_1, llm_col_2 = st.columns(2)
 
     with llm_col_1:
-        st.markdown("#### Naive LLM Call Estimate")
+        st.markdown("#### Naive RAG LLM Call Estimate")
         st.metric(
-            "Estimated Input Tokens",
+            "Approx. Estimated Input Tokens",
             naive_est.get("estimated_input_tokens", 0),
         )
         st.metric(
-            "Estimated Output Tokens",
+            "Approx. Estimated Output Tokens",
             naive_est.get("estimated_output_tokens", 0),
         )
         st.metric(
-            "Estimated Total Tokens",
+            "Approx. Estimated Total Tokens",
             naive_est.get("estimated_total_tokens", 0),
         )
 
     with llm_col_2:
-        st.markdown("#### Engineered LLM Call Estimate")
+        st.markdown("#### Engineered Context LLM Call Estimate")
         st.metric(
-            "Estimated Input Tokens",
+            "Approx. Estimated Input Tokens",
             engineered_est.get("estimated_input_tokens", 0),
         )
         st.metric(
-            "Estimated Output Tokens",
+            "Approx. Estimated Output Tokens",
             engineered_est.get("estimated_output_tokens", 0),
         )
         st.metric(
-            "Estimated Total Tokens",
+            "Approx. Estimated Total Tokens",
             engineered_est.get("estimated_total_tokens", 0),
         )
 
@@ -1119,13 +1121,13 @@ with tab_3:
     combined_col_1, combined_col_2, combined_col_3 = st.columns(3)
 
     with combined_col_1:
-        st.metric("Combined Estimated Input Tokens", combined_input)
+        st.metric("Approx. Combined Estimated Input Tokens", combined_input)
 
     with combined_col_2:
-        st.metric("Combined Estimated Output Tokens", combined_output)
+        st.metric("Approx. Combined Estimated Output Tokens", combined_output)
 
     with combined_col_3:
-        st.metric("Combined Estimated Total Tokens", combined_total)
+        st.metric("Approx. Combined Estimated Total Tokens", combined_total)
 
     st.warning(
         "These token values are approximate. The provider dashboard may show different "
@@ -1149,117 +1151,47 @@ with tab_3:
 
     st.divider()
 
-    st.subheader("Approximate Context Efficiency Metrics")
-    st.caption(
-        "These metrics compare context size only (not full LLM API calls). "
-        "See estimated LLM API usage above for input + output per call."
+    st.subheader("5. Pipeline Stage Review")
+
+    naive_answer_tokens = count_approx_tokens(st.session_state.naive_answer)
+    engineered_answer_tokens = count_approx_tokens(st.session_state.engineered_answer)
+
+    selected_count = len(
+        [
+            result
+            for result in st.session_state.reranked_results
+            if result.get("selected") is True
+        ]
     )
-    show_metric_cards(st.session_state.metrics)
+
+    review_col_1, review_col_2 = st.columns(2)
+
+    with review_col_1:
+        st.markdown("#### Naive RAG Pipeline")
+        st.metric("Fixed-Size Chunks Count", len(st.session_state.naive_chunks))
+        st.metric("Raw Vector Retrieval Results", len(st.session_state.raw_vector_results))
+        st.metric(
+            "Approx. Naive Context Tokens",
+            st.session_state.metrics["naive_context_tokens"],
+        )
+        st.metric("Approx. Naive Answer Tokens", naive_answer_tokens)
+
+    with review_col_2:
+        st.markdown("#### Engineered Context Pipeline")
+        st.metric("Sentence Count", len(st.session_state.sentences))
+        st.metric("Semantic Chunk Count", len(st.session_state.semantic_chunks))
+        st.metric("Breakpoint Count", len(st.session_state.semantic_breakpoints))
+        st.metric("Parent Chunk Count", len(st.session_state.parent_chunks))
+        st.metric("Child Chunk Count", len(st.session_state.child_chunks))
+        st.metric("Re-ranked Candidate Count", len(st.session_state.reranked_results))
+        st.metric("Selected Evidence Count", selected_count)
+        st.metric(
+            "Approx. Engineered Context Tokens",
+            st.session_state.metrics["engineered_context_tokens"],
+        )
+        st.metric("Approx. Engineered Answer Tokens", engineered_answer_tokens)
 
     st.divider()
 
-    with st.expander("Compare Available Pipeline Versions"):
-        st.markdown("### Version 1: Naive Fixed-Size Chunks")
-
-        st.write(
-            "Baseline chunking version. It splits by character count and may cut ideas."
-        )
-
-        st.metric(
-            "Naive Chunk Count",
-            len(st.session_state.naive_chunks)
-        )
-
-        st.markdown("### Version 2: Semantic Chunks")
-
-        st.write(
-            "Meaning-based chunking version. It uses sentence distance spikes."
-        )
-
-        st.metric(
-            "Semantic Chunk Count",
-            len(st.session_state.semantic_chunks)
-        )
-
-        st.markdown("### Version 3: Parent-Child Retrieval Chunks")
-
-        st.write(
-            "Uses semantic chunks as larger parent context and smaller child chunks "
-            "for precise search."
-        )
-
-        col_parent, col_child = st.columns(2)
-
-        with col_parent:
-            st.metric(
-                "Parent Chunk Count",
-                len(st.session_state.parent_chunks)
-            )
-
-        with col_child:
-            st.metric(
-                "Child Chunk Count",
-                len(st.session_state.child_chunks)
-            )
-
-        st.markdown("### Version 4: Raw Vector Retrieval Results")
-
-        st.write(
-            "Uses the question to search child chunks by vector similarity."
-        )
-
-        st.metric(
-            "Raw Vector Results",
-            len(st.session_state.raw_vector_results)
-        )
-
-        st.markdown("### Version 5: Cross-Encoder Re-ranked Results")
-
-        st.write(
-            "Uses a cross-encoder to re-rank raw vector candidates more precisely."
-        )
-
-        selected_count = len(
-            [
-                result
-                for result in st.session_state.reranked_results
-                if result.get("selected") is True
-            ]
-        )
-
-        col_rerank_all, col_rerank_selected = st.columns(2)
-
-        with col_rerank_all:
-            st.metric(
-                "Re-ranked Candidates",
-                len(st.session_state.reranked_results)
-            )
-
-        with col_rerank_selected:
-            st.metric(
-                "Selected Final Chunks",
-                selected_count
-            )
-
-        st.markdown("### Version 6: Context Builder and Token Metrics")
-
-        st.write(
-            "Builds final naive and engineered contexts separately, then compares "
-            "their approximate token usage."
-        )
-
-        col_naive_context, col_engineered_context = st.columns(2)
-
-        with col_naive_context:
-            st.metric(
-                "Naive Context Tokens",
-                st.session_state.metrics["naive_context_tokens"]
-            )
-
-        with col_engineered_context:
-            st.metric(
-                "Engineered Context Tokens",
-                st.session_state.metrics["engineered_context_tokens"]
-            )
-
+    st.subheader("6. Interview Talking Points")
     show_interview_talking_points()
