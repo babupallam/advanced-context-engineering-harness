@@ -6,8 +6,6 @@ A research-oriented Streamlit lab for comparing **naive RAG** against an **engin
 
 ![Application overview](docs/images/app_overview.png)
 
-*Overview of the side-by-side pipeline comparison UI. Replace `docs/images/app_overview.png` with a capture from your deployment if you prefer a pixel-accurate screenshot.*
-
 ---
 
 ## Why this project exists
