@@ -55,6 +55,142 @@ def show_pipeline_summary():
     st.divider()
 
 
+PIPELINE_MODE_OPTIONS = [
+    "Stage 1: Naive RAG",
+    "Stage 2: Semantic Chunking",
+    "Stage 3: Metadata Anchoring",
+    "Stage 4: Parent-Child Retrieval",
+    "Stage 5: Vector Retrieval",
+    "Stage 6: Cross-Encoder Re-ranking",
+    "Stage 7: Context Builder",
+    "Stage 8: LLM Answer Generation",
+    "Stage 9: Prompt Engineering Lab",
+    "Stage 10: Evaluation Lab",
+]
+
+PIPELINE_EVOLUTION_STAGES = [
+    "Naive RAG",
+    "Semantic Chunking",
+    "Metadata Anchoring",
+    "Parent-Child Retrieval",
+    "Vector Retrieval",
+    "Re-ranking",
+    "Context Builder",
+    "LLM Answer",
+    "Prompt Engineering",
+    "Evaluation",
+]
+
+
+def show_pipeline_evolution_map(selected_pipeline_mode):
+    """
+    Show the progressive pipeline stages from naive RAG through evaluation.
+    """
+
+    st.markdown("### Pipeline Evolution Map")
+
+    flow_text = " → ".join(PIPELINE_EVOLUTION_STAGES)
+    st.info(flow_text)
+
+    stage_index = 0
+    for index, option in enumerate(PIPELINE_MODE_OPTIONS):
+        if option == selected_pipeline_mode:
+            stage_index = index
+            break
+
+    st.caption(
+        f"Currently exploring: **{selected_pipeline_mode}** "
+        f"(step {stage_index + 1} of {len(PIPELINE_MODE_OPTIONS)} in the workbench path)."
+    )
+
+
+def show_selected_pipeline_mode_info(selected_pipeline_mode):
+    """
+    Show a short note about the sidebar pipeline mode selection.
+    """
+
+    st.markdown(f"**Workbench focus:** {selected_pipeline_mode}")
+    st.caption(
+        "Use the sidebar **Select pipeline mode** control to highlight which stage "
+        "you are studying. All pipeline stages still run together when you click "
+        "Run Context Engineering Analysis."
+    )
+
+
+def show_prompt_lab_placeholder():
+    """
+    Placeholder for future prompt engineering experiments.
+    """
+
+    st.info(
+        "**Prompt Engineering Lab (coming soon)** — This tab will let you compare "
+        "system prompts, few-shot examples, instruction templates, and context "
+        "wrappers without changing the retrieval backend."
+    )
+    st.markdown(
+        """
+Planned additions:
+
+- Side-by-side prompt template editor
+- System vs user message preview before LLM calls
+- Prompt version history and A/B comparison
+- Token impact preview for prompt changes
+        """
+    )
+
+
+def show_evaluation_lab_placeholder():
+    """
+    Placeholder for future RAG evaluation workflows.
+    """
+
+    st.info(
+        "**Evaluation Lab (coming soon)** — This tab will host golden Q&A sets, "
+        "retrieval quality scores, and answer grading against reference outputs."
+    )
+    st.markdown(
+        """
+Planned additions:
+
+- Golden question / answer benchmark sets
+- Retrieval hit-rate and MRR-style metrics
+- LLM-as-judge or rubric-based answer scoring
+- Exportable evaluation reports tied to run logs
+        """
+    )
+
+
+def show_observability_placeholder(processing_times=None):
+    """
+    Placeholder and current timing summary for pipeline observability.
+    """
+
+    st.info(
+        "**Observability (expanding)** — This tab will grow into a full run "
+        "dashboard with traces, stage timings, and log analytics."
+    )
+
+    if processing_times:
+        st.subheader("Current Run Processing Times")
+        show_processing_time_summary(processing_times)
+
+    st.markdown(
+        """
+Planned additions:
+
+- Per-stage latency charts across historical runs
+- Retrieval and re-ranking score distributions
+- Error and warning timeline from process logs
+- Links to automated regression checks after pipeline changes
+        """
+    )
+
+    try:
+        st.page_link("pages/1_History_Logs.py", label="Open History Logs", icon="📊")
+    except Exception:
+        st.caption("Open **History Logs** from the Streamlit sidebar navigation.")
+
+
 def show_token_metric_disclaimer():
     """
     Shared disclaimer for tiktoken-based token counts.

@@ -58,7 +58,13 @@ from src.evaluation.process_logger import (
 )
 from src.evaluation.similarity_analysis import calculate_chunk_similarity_matrix
 from src.ui.ui_components import (
+    PIPELINE_MODE_OPTIONS,
     show_pipeline_summary,
+    show_pipeline_evolution_map,
+    show_selected_pipeline_mode_info,
+    show_prompt_lab_placeholder,
+    show_evaluation_lab_placeholder,
+    show_observability_placeholder,
     show_metric_cards,
     show_context_difference_metrics,
     show_chunk_card,
@@ -164,7 +170,7 @@ def build_analysis_log_event(
 
 
 st.set_page_config(
-    page_title="Advanced Context Engineering Harness",
+    page_title="AI Retrieval & Context Engineering Workbench",
     page_icon="assets/context-engineering.png",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -264,6 +270,9 @@ if "chunk_similarity_matrix" not in st.session_state:
 if "chunk_average_similarity" not in st.session_state:
     st.session_state.chunk_average_similarity = None
 
+if "selected_pipeline_mode" not in st.session_state:
+    st.session_state.selected_pipeline_mode = PIPELINE_MODE_OPTIONS[0]
+
 
 #cache the embedding model
 @st.cache_resource
@@ -292,19 +301,39 @@ def get_cached_reranker_model(model_name):
 
 
 #title and description
-st.title("Advanced Context Engineering Harness")
+st.title("AI Retrieval & Context Engineering Workbench")
 
 # caption under title
 st.caption(
-    "Compare naive RAG with engineered context retrieval using semantic chunking, "
-    "metadata anchoring, parent-child retrieval, re-ranking, and token-efficiency metrics."
+    "An experimentation workbench for comparing RAG, retrieval, prompting, "
+    "context engineering, and evaluation techniques."
 )
 
-show_pipeline_summary()
+show_pipeline_evolution_map(st.session_state.selected_pipeline_mode)
 
 #sidebar 
 
 with st.sidebar:
+    st.header("Workbench Mode")
+
+    pipeline_mode_index = (
+        PIPELINE_MODE_OPTIONS.index(st.session_state.selected_pipeline_mode)
+        if st.session_state.selected_pipeline_mode in PIPELINE_MODE_OPTIONS
+        else 0
+    )
+
+    st.session_state.selected_pipeline_mode = st.selectbox(
+        "Select pipeline mode",
+        PIPELINE_MODE_OPTIONS,
+        index=pipeline_mode_index,
+        help=(
+            "Choose which pipeline stage to focus on while exploring the workbench. "
+            "The full pipeline still runs on analysis."
+        ),
+    )
+
+    st.divider()
+
     st.header("Input controls")
 
     try:
@@ -323,9 +352,13 @@ with st.sidebar:
 
 **What each tab shows**
 
-- **Tab 1 — Engineered Pipeline: Semantic Chunk Map:** Preparation stages before final retrieval (sentence splitting through parent-child structure).
-- **Tab 2 — Engineered Pipeline: Retrieval and Re-ranking Analytics:** Candidate retrieval, cross-encoder re-ranking, and final evidence selection.
-- **Tab 3 — Naive RAG vs Engineered Context:** Side-by-side answers, contexts, token metrics, and pipeline stage review.
+- **1 Pipeline Overview:** High-level naive vs engineered pipeline summary and workbench focus.
+- **2 Chunking Lab:** Sentence splitting, semantic distances, breakpoints, metadata, parent-child chunks.
+- **3 Retrieval Lab:** Vector search candidates, cross-encoder re-ranking, and final evidence selection.
+- **4 Prompt Lab:** Placeholder for future prompt template experiments.
+- **5 Answer Comparison:** Side-by-side answers, contexts, token metrics, and pipeline stage review.
+- **6 Evaluation Lab:** Placeholder for future benchmark and scoring workflows.
+- **7 Observability:** Processing timings today; expanded run dashboards coming later.
             """
         )
 
@@ -804,8 +837,8 @@ if run_button:
 
             st.success(
                 "Analysis complete: retrieval, re-ranking, contexts, metrics, and "
-                "answers are ready. Review Tab 2 for ranking details and Tab 3 for "
-                "comparison."
+                "answers are ready. Review **Retrieval Lab** for ranking details and "
+                "**Answer Comparison** for side-by-side results."
             )
 
         except Exception as run_error:
@@ -833,19 +866,49 @@ st.subheader("Context Efficiency Metrics")
 show_token_metric_disclaimer()
 show_metric_cards(st.session_state.metrics)
 
-# Three tabs for displaying different aspects of the context engineering process
-tab_1, tab_2, tab_3 = st.tabs(
+# Seven workbench tabs for exploring the retrieval and context pipeline
+tab_overview, tab_chunking, tab_retrieval, tab_prompt, tab_answers, tab_evaluation, tab_observability = st.tabs(
     [
-        "Engineered Pipeline: Semantic Chunk Map",
-        "Engineered Pipeline: Retrieval and Re-ranking Analytics",
-        "Naive RAG vs Engineered Context",
+        "1 Pipeline Overview",
+        "2 Chunking Lab",
+        "3 Retrieval Lab",
+        "4 Prompt Lab",
+        "5 Answer Comparison",
+        "6 Evaluation Lab",
+        "7 Observability",
     ]
 )
 
 # ============================================================
-# TAB 1: SEMANTIC CHUNK MAP
+# TAB 1: PIPELINE OVERVIEW
 # ============================================================
-# This tab will later show:
+
+with tab_overview:
+    st.header("Pipeline Overview")
+
+    st.write(
+        "This workbench runs a full naive RAG pipeline and a progressively engineered "
+        "context pipeline on the same document and question so you can compare each stage."
+    )
+
+    show_selected_pipeline_mode_info(st.session_state.selected_pipeline_mode)
+    show_pipeline_summary()
+
+    overview_col_1, overview_col_2, overview_col_3 = st.columns(3)
+
+    with overview_col_1:
+        st.metric("Naive Chunks", len(st.session_state.naive_chunks))
+
+    with overview_col_2:
+        st.metric("Semantic Chunks", len(st.session_state.semantic_chunks))
+
+    with overview_col_3:
+        st.metric("Re-ranked Results", len(st.session_state.reranked_results))
+
+# ============================================================
+# TAB 2: CHUNKING LAB (SEMANTIC CHUNK MAP)
+# ============================================================
+# This tab shows:
 # - sentence count
 # - naive chunk count
 # - semantic chunk count
@@ -853,13 +916,12 @@ tab_1, tab_2, tab_3 = st.tabs(
 # - semantic breakpoint chart
 # - final semantic chunks
 
-with tab_1:
-    st.header("Engineered Pipeline: Semantic Chunk Map")
+with tab_chunking:
+    st.header("Chunking Lab")
 
     st.write(
-        "This tab shows the engineered pipeline preparation stages before final "
-        "retrieval: sentence splitting, semantic distance, breakpoints, semantic "
-        "chunks, metadata anchoring, and parent-child structure."
+        "Explore chunking and structure stages: sentence splitting, semantic distance, "
+        "breakpoints, semantic chunks, metadata anchoring, and parent-child units."
     )
 
     col_a, col_b, col_c, col_d, col_e, col_f = st.columns(6)
@@ -1130,21 +1192,21 @@ with tab_1:
 
 
 # ============================================================
-# TAB 2: RE-RANKER ANALYTICS
+# TAB 3: RETRIEVAL LAB (RE-RANKER ANALYTICS)
 # ============================================================
-# This tab will later show:
-# - top 10 raw vector search hits
+# This tab shows:
+# - top raw vector search hits
 # - vector similarity scores
 # - cross-encoder re-ranker scores
-# - final top 3 selected chunks
+# - final selected chunks
 
-with tab_2:
-    st.header("Engineered Pipeline: Retrieval and Re-ranking Analytics")
+with tab_retrieval:
+    st.header("Retrieval Lab")
 
     show_info_box(
         "What this tab shows",
-        "This tab shows how the engineered pipeline retrieves candidate child chunks "
-        "and re-ranks them before final context construction.",
+        "Vector retrieval over child chunks, cross-encoder re-ranking, and final "
+        "evidence selection before context building.",
     )
 
     st.divider()
@@ -1343,17 +1405,25 @@ with tab_2:
         )
 
 # ============================================================
-# TAB 3: NAIVE RAG VS ENGINEERED CONTEXT
+# TAB 4: PROMPT LAB (PLACEHOLDER)
 # ============================================================
-# This tab will later show:
+
+with tab_prompt:
+    st.header("Prompt Lab")
+    show_prompt_lab_placeholder()
+
+# ============================================================
+# TAB 5: ANSWER COMPARISON (NAIVE RAG VS ENGINEERED CONTEXT)
+# ============================================================
+# This tab shows:
 # - naive answer
 # - engineered context answer
 # - context used by both approaches
 # - token comparison
 # - retrieval quality explanation
 
-with tab_3:
-    st.header("Naive RAG vs Engineered Context")
+with tab_answers:
+    st.header("Answer Comparison")
 
     st.write(
         "Compare final answers, contexts, approximate token metrics, and a stage-by-stage "
@@ -1487,10 +1557,6 @@ with tab_3:
 
     st.divider()
 
-    show_processing_time_summary(st.session_state.processing_times)
-
-    st.divider()
-
     st.subheader("5. Pipeline Stage Review")
 
     token_model_name = (
@@ -1546,3 +1612,19 @@ with tab_3:
     st.divider()
 
     show_pipeline_defaults_expander(get_pipeline_defaults())
+
+# ============================================================
+# TAB 6: EVALUATION LAB (PLACEHOLDER)
+# ============================================================
+
+with tab_evaluation:
+    st.header("Evaluation Lab")
+    show_evaluation_lab_placeholder()
+
+# ============================================================
+# TAB 7: OBSERVABILITY
+# ============================================================
+
+with tab_observability:
+    st.header("Observability")
+    show_observability_placeholder(st.session_state.processing_times)
