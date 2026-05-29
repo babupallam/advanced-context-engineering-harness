@@ -300,6 +300,43 @@ def show_info_box(title, body):
     st.info(body)
 
 
+def show_processing_time_summary(processing_times):
+    """
+    Display per-step processing durations from the latest analysis run.
+    """
+
+    st.subheader("Processing Time Summary")
+    show_formula_hint("Durations are measured in seconds for the most recent analysis run.")
+
+    times = processing_times or {}
+    time_col_1, time_col_2, time_col_3, time_col_4 = st.columns(4)
+
+    with time_col_1:
+        st.metric(
+            "Total Processing Time",
+            times.get("total_processing_seconds", 0),
+        )
+        st.metric(
+            "Document Processing Time",
+            times.get("document_processing_seconds", 0),
+        )
+
+    with time_col_2:
+        st.metric("Chunking Time", times.get("chunking_seconds", 0))
+        st.metric("Embedding Time", times.get("embedding_seconds", 0))
+
+    with time_col_3:
+        st.metric("Vector Search Time", times.get("vector_search_seconds", 0))
+        st.metric("Re-ranking Time", times.get("reranking_seconds", 0))
+
+    with time_col_4:
+        st.metric("Naive LLM Call Time", times.get("naive_llm_seconds", 0))
+        st.metric(
+            "Engineered LLM Call Time",
+            times.get("engineered_llm_seconds", 0),
+        )
+
+
 def show_warning_for_large_document(document_text):
     """
     Warn the user if the uploaded document is very large.

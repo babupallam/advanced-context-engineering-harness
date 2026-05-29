@@ -8,6 +8,10 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 logging.getLogger("transformers").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", message=r"Accessing `__path__` from")
 
+import time
+import uuid
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
@@ -47,6 +51,12 @@ from src.config.model_config import (
 )
 from src.config.pipeline_config import get_pipeline_defaults
 from src.generation.llm_client import generate_answer
+from src.evaluation.process_logger import (
+    create_uploaded_file_log_name,
+    get_current_timestamp,
+    log_process_event,
+)
+from src.evaluation.similarity_analysis import calculate_chunk_similarity_matrix
 from src.ui.ui_components import (
     show_pipeline_summary,
     show_metric_cards,
@@ -59,12 +69,103 @@ from src.ui.ui_components import (
     show_formula_hint,
     show_llm_token_estimate_column,
     show_context_with_chunk_expanders,
+    show_processing_time_summary,
 )
+
+
+def build_analysis_log_event(
+    *,
+    run_id,
+    event_type,
+    question,
+    llm_model_display_name,
+    embedding_model_name,
+    reranker_model_name,
+    threshold_mode,
+    naive_chunk_size,
+    naive_chunk_overlap,
+    raw_top_k,
+    final_top_n,
+    child_max_words,
+    child_overlap_words,
+    naive_context_max_chunks,
+    status,
+    error_message="",
+    total_processing_seconds=0,
+):
+    """Build a CSV log row dict from current session state and run settings."""
+
+    return {
+        "timestamp": get_current_timestamp(),
+        "run_id": run_id,
+        "event_type": event_type,
+        "uploaded_file_name": st.session_state.uploaded_file_name,
+        "uploaded_file_extension": st.session_state.get("uploaded_file_extension", ""),
+        "stored_file_log_name": st.session_state.get("stored_file_log_name", ""),
+        "question": question,
+        "selected_llm_model": llm_model_display_name,
+        "embedding_model": embedding_model_name,
+        "reranker_model": reranker_model_name,
+        "semantic_threshold_mode": threshold_mode,
+        "naive_chunk_size": naive_chunk_size,
+        "naive_chunk_overlap": naive_chunk_overlap,
+        "raw_top_k": raw_top_k,
+        "final_top_n": final_top_n,
+        "child_max_words": child_max_words,
+        "child_overlap_words": child_overlap_words,
+        "naive_context_max_chunks": naive_context_max_chunks,
+        "full_document_tokens": st.session_state.metrics.get("full_document_tokens", 0),
+        "naive_context_tokens": st.session_state.metrics.get("naive_context_tokens", 0),
+        "engineered_context_tokens": st.session_state.metrics.get(
+            "engineered_context_tokens", 0
+        ),
+        "context_size_difference": st.session_state.metrics.get(
+            "context_size_difference", 0
+        ),
+        "context_change_percent": st.session_state.metrics.get("context_change_percent", 0),
+        "context_reduction_percent": st.session_state.metrics.get(
+            "context_reduction_percent", 0
+        ),
+        "naive_estimated_input_tokens": st.session_state.naive_llm_token_estimate.get(
+            "estimated_input_tokens", 0
+        ),
+        "naive_estimated_output_tokens": st.session_state.naive_llm_token_estimate.get(
+            "estimated_output_tokens", 0
+        ),
+        "naive_estimated_total_tokens": st.session_state.naive_llm_token_estimate.get(
+            "estimated_total_tokens", 0
+        ),
+        "engineered_estimated_input_tokens": st.session_state.engineered_llm_token_estimate.get(
+            "estimated_input_tokens", 0
+        ),
+        "engineered_estimated_output_tokens": st.session_state.engineered_llm_token_estimate.get(
+            "estimated_output_tokens", 0
+        ),
+        "engineered_estimated_total_tokens": st.session_state.engineered_llm_token_estimate.get(
+            "estimated_total_tokens", 0
+        ),
+        "document_processing_seconds": st.session_state.processing_times.get(
+            "document_processing_seconds", 0
+        ),
+        "chunking_seconds": st.session_state.processing_times.get("chunking_seconds", 0),
+        "embedding_seconds": st.session_state.processing_times.get("embedding_seconds", 0),
+        "vector_search_seconds": st.session_state.processing_times.get(
+            "vector_search_seconds", 0
+        ),
+        "reranking_seconds": st.session_state.processing_times.get("reranking_seconds", 0),
+        "naive_llm_seconds": st.session_state.processing_times.get("naive_llm_seconds", 0),
+        "engineered_llm_seconds": st.session_state.processing_times.get(
+            "engineered_llm_seconds", 0
+        ),
+        "total_processing_seconds": total_processing_seconds,
+        "status": status,
+        "error_message": error_message,
+    }
 
 
 st.set_page_config(
     page_title="Advanced Context Engineering Harness",
-    page_icon="🧠",
+    page_icon="assets/context-engineering.png",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -145,6 +246,24 @@ if "naive_llm_token_estimate" not in st.session_state:
 if "engineered_llm_token_estimate" not in st.session_state:
     st.session_state.engineered_llm_token_estimate = {}
 
+if "current_run_id" not in st.session_state:
+    st.session_state.current_run_id = ""
+
+if "processing_times" not in st.session_state:
+    st.session_state.processing_times = {}
+
+if "stored_file_log_name" not in st.session_state:
+    st.session_state.stored_file_log_name = ""
+
+if "uploaded_file_extension" not in st.session_state:
+    st.session_state.uploaded_file_extension = ""
+
+if "chunk_similarity_matrix" not in st.session_state:
+    st.session_state.chunk_similarity_matrix = None
+
+if "chunk_average_similarity" not in st.session_state:
+    st.session_state.chunk_average_similarity = None
+
 
 #cache the embedding model
 @st.cache_resource
@@ -187,6 +306,11 @@ show_pipeline_summary()
 
 with st.sidebar:
     st.header("Input controls")
+
+    try:
+        st.page_link("pages/1_History_Logs.py", label="View History Logs", icon="📊")
+    except Exception:
+        st.info("Open the History Logs page from the Streamlit sidebar navigation.")
 
     with st.expander("How this app works"):
         st.markdown(
@@ -379,62 +503,116 @@ with st.sidebar:
 
 if uploaded_file is not None:
     try:
+        st.session_state.stored_file_log_name = create_uploaded_file_log_name(
+            uploaded_file.name
+        )
+        st.session_state.uploaded_file_extension = Path(uploaded_file.name).suffix or ""
+
+        document_start = time.perf_counter()
         document_text = load_uploaded_document(uploaded_file)
         cleaned_text = clean_text(document_text)
+        st.session_state.processing_times["document_processing_seconds"] = round(
+            time.perf_counter() - document_start,
+            4,
+        )
 
         st.session_state.document_text = cleaned_text
         st.session_state.uploaded_file_name = uploaded_file.name
 
         st.session_state.document_metadata = create_document_metadata(
-            uploaded_file.name, 
-            st.session_state.document_text
+            uploaded_file.name,
+            st.session_state.document_text,
         )
 
-        #Naive chunking
-
-        # Generate naive chunks immediately after text extraction and cleaning
-        naive_chunks = naive_chunk_text(text = st.session_state.document_text,chunk_size= naive_chunk_size,overlap= naive_chunk_overlap)
-        st.session_state.naive_chunks = attach_metadata_to_chunks(naive_chunks, st.session_state.document_metadata)
-
-        #Semantic chunking
+        chunking_start = time.perf_counter()
+        naive_chunks = naive_chunk_text(
+            text=st.session_state.document_text,
+            chunk_size=naive_chunk_size,
+            overlap=naive_chunk_overlap,
+        )
+        st.session_state.naive_chunks = attach_metadata_to_chunks(
+            naive_chunks, st.session_state.document_metadata
+        )
 
         st.session_state.sentences = split_into_sentences(st.session_state.document_text)
 
         if st.session_state.sentences:
             sentence_texts = [sentence["text"] for sentence in st.session_state.sentences]
             embedding_model = get_cached_embedding_model(embedding_model_name)
-            st.session_state.sentence_embeddings = embed_texts(sentence_texts, embedding_model)
-            st.session_state.sentence_distances = calculate_sentence_distances(st.session_state.sentences, st.session_state.sentence_embeddings)
-            st.session_state.semantic_breakpoints = find_semantic_breakpoints(
-                distances = st.session_state.sentence_distances, 
-                mode = threshold_mode
+            st.session_state.sentence_embeddings = embed_texts(
+                sentence_texts, embedding_model
             )
-            
+            st.session_state.sentence_distances = calculate_sentence_distances(
+                st.session_state.sentences,
+                st.session_state.sentence_embeddings,
+            )
+            st.session_state.semantic_breakpoints = find_semantic_breakpoints(
+                distances=st.session_state.sentence_distances,
+                mode=threshold_mode,
+            )
+
             semantic_chunks = build_semantic_chunks(
                 sentences=st.session_state.sentences,
                 breakpoints=st.session_state.semantic_breakpoints,
             )
-            st.session_state.semantic_chunks = attach_metadata_to_chunks(semantic_chunks, st.session_state.document_metadata)
+            st.session_state.semantic_chunks = attach_metadata_to_chunks(
+                semantic_chunks, st.session_state.document_metadata
+            )
 
             parent_chunks, child_chunks = create_parent_child_chunks(
                 semantic_chunks=st.session_state.semantic_chunks,
                 child_max_words=child_max_words,
-                child_overlap_words=child_overlap_words
+                child_overlap_words=child_overlap_words,
             )
             st.session_state.parent_chunks = parent_chunks
             st.session_state.child_chunks = child_chunks
+        else:
+            st.session_state.semantic_breakpoints = []
+            st.session_state.semantic_chunks = []
+            st.session_state.parent_chunks = []
+            st.session_state.child_chunks = []
 
+        st.session_state.processing_times["chunking_seconds"] = round(
+            time.perf_counter() - chunking_start,
+            4,
+        )
 
-            if st.session_state.child_chunks:
-                st.session_state.vector_index = build_vector_index(
-                    child_chunks=st.session_state.child_chunks,
-                    embedding_model=embedding_model
+        if st.session_state.sentences and st.session_state.child_chunks:
+            embedding_start = time.perf_counter()
+            embedding_model = get_cached_embedding_model(embedding_model_name)
+
+            st.session_state.vector_index = build_vector_index(
+                child_chunks=st.session_state.child_chunks,
+                embedding_model=embedding_model,
+            )
+
+            if st.session_state.semantic_chunks:
+                similarity_matrix, average_similarity_df = calculate_chunk_similarity_matrix(
+                    st.session_state.semantic_chunks,
+                    embedding_model,
                 )
-            
+                st.session_state.chunk_similarity_matrix = similarity_matrix
+                st.session_state.chunk_average_similarity = average_similarity_df
+            else:
+                st.session_state.chunk_similarity_matrix = None
+                st.session_state.chunk_average_similarity = None
+
+            st.session_state.processing_times["embedding_seconds"] = round(
+                time.perf_counter() - embedding_start,
+                4,
+            )
+        else:
+            st.session_state.vector_index = {}
+            st.session_state.chunk_similarity_matrix = None
+            st.session_state.chunk_average_similarity = None
+            st.session_state.processing_times["embedding_seconds"] = 0
+
     except Exception as e:
         st.error(f"Document extraction or chunking failed: {e}")
         st.session_state.document_text = ""
         st.session_state.uploaded_file_name = ""
+        st.session_state.chunk_similarity_matrix = None
+        st.session_state.chunk_average_similarity = None
 
 #Basic document stats
 document_character_count = len(st.session_state.document_text) if st.session_state.document_text else 0
@@ -477,112 +655,178 @@ if run_button:
             "Vector index is not available yet. Re-upload the document to build the index."
         )
     else:
-        embedding_model = get_cached_embedding_model(
-            embedding_model_name
-        )
+        run_id = str(uuid.uuid4())
+        st.session_state.current_run_id = run_id
+        total_start_time = time.perf_counter()
 
-        # STEP 1: Raw vector retrieval
-        st.session_state.raw_vector_results = retrieve_top_k(
-            query=question,
-            child_chunks=st.session_state.child_chunks,
-            index=st.session_state.vector_index,
-            embedding_model=embedding_model,
-            top_k=raw_top_k
-        )
+        log_settings = {
+            "question": question,
+            "llm_model_display_name": llm_model_display_name,
+            "embedding_model_name": embedding_model_name,
+            "reranker_model_name": reranker_model_name,
+            "threshold_mode": threshold_mode,
+            "naive_chunk_size": naive_chunk_size,
+            "naive_chunk_overlap": naive_chunk_overlap,
+            "raw_top_k": raw_top_k,
+            "final_top_n": final_top_n,
+            "child_max_words": child_max_words,
+            "child_overlap_words": child_overlap_words,
+            "naive_context_max_chunks": naive_context_max_chunks,
+        }
 
-        # STEP 2: Cross-encoder re-ranking
-        reranker_model = get_cached_reranker_model(
-            reranker_model_name
-        )
+        try:
+            embedding_model = get_cached_embedding_model(embedding_model_name)
 
-        st.session_state.reranked_results = rerank_results(
-            query=question,
-            raw_results=st.session_state.raw_vector_results,
-            reranker_model=reranker_model,
-            top_n=final_top_n
-        )
-
-        # STEP 3: Build naive context from raw vector hits (no re-ranking)
-        st.session_state.naive_context = build_naive_context(
-            raw_vector_results=st.session_state.raw_vector_results,
-            max_chunks=naive_context_max_chunks
-        )
-
-        # STEP 4: Build engineered context from selected re-ranked results
-        st.session_state.engineered_context = build_engineered_context(
-            reranked_results=st.session_state.reranked_results
-        )
-
-        llm_api_key = st.secrets.get("LLM_API_KEY", "")
-        llm_base_url = st.secrets.get("LLM_BASE_URL", "")
-
-        if not llm_api_key:
-            st.error("LLM_API_KEY is missing from Streamlit secrets.")
-            st.stop()
-
-        if not llm_base_url:
-            st.error("LLM_BASE_URL is missing from Streamlit secrets.")
-            st.stop()
-
-        llm_model_name = get_provider_model_id(llm_model_display_name)
-        st.session_state.selected_llm_model_name = llm_model_name
-
-        if llm_model_name == "PUT_PROVIDER_MODEL_ID_HERE":
-            st.error(
-                "The selected model still uses a placeholder provider model ID. "
-                "Update src/config/model_config.py with the real model ID before running "
-                "LLM generation."
+            vector_search_start = time.perf_counter()
+            st.session_state.raw_vector_results = retrieve_top_k(
+                query=question,
+                child_chunks=st.session_state.child_chunks,
+                index=st.session_state.vector_index,
+                embedding_model=embedding_model,
+                top_k=raw_top_k,
             )
-            st.stop()
+            st.session_state.processing_times["vector_search_seconds"] = round(
+                time.perf_counter() - vector_search_start,
+                4,
+            )
 
-        # STEP 5: Token-efficiency metrics (after both contexts exist)
-        st.session_state.metrics = calculate_context_metrics(
-            full_text=st.session_state.document_text,
-            naive_context=st.session_state.naive_context,
-            engineered_context=st.session_state.engineered_context,
-            model_name=llm_model_name,
-        )
+            reranking_start = time.perf_counter()
+            reranker_model = get_cached_reranker_model(reranker_model_name)
+            st.session_state.reranked_results = rerank_results(
+                query=question,
+                raw_results=st.session_state.raw_vector_results,
+                reranker_model=reranker_model,
+                top_n=final_top_n,
+            )
+            st.session_state.processing_times["reranking_seconds"] = round(
+                time.perf_counter() - reranking_start,
+                4,
+            )
 
-        # STEP 6: Generate naive answer (uses naive_context; kept separate for comparison)
-        st.session_state.naive_answer = generate_answer(
-            question=question,
-            context=st.session_state.naive_context,
-            mode="Naive RAG",
-            api_key=llm_api_key,
-            base_url=llm_base_url,
-            model_name=llm_model_name,
-            temperature=llm_temperature
-        )
+            st.session_state.naive_context = build_naive_context(
+                raw_vector_results=st.session_state.raw_vector_results,
+                max_chunks=naive_context_max_chunks,
+            )
 
-        # STEP 7: Generate engineered answer (uses engineered_context)
-        st.session_state.engineered_answer = generate_answer(
-            question=question,
-            context=st.session_state.engineered_context,
-            mode="Engineered Context Retrieval",
-            api_key=llm_api_key,
-            base_url=llm_base_url,
-            model_name=llm_model_name,
-            temperature=llm_temperature
-        )
+            st.session_state.engineered_context = build_engineered_context(
+                reranked_results=st.session_state.reranked_results,
+            )
 
-        st.session_state.naive_llm_token_estimate = calculate_llm_call_token_estimates(
-            question=question,
-            context=st.session_state.naive_context,
-            answer=st.session_state.naive_answer,
-            model_name=llm_model_name,
-        )
+            llm_api_key = st.secrets.get("LLM_API_KEY", "")
+            llm_base_url = st.secrets.get("LLM_BASE_URL", "")
 
-        st.session_state.engineered_llm_token_estimate = calculate_llm_call_token_estimates(
-            question=question,
-            context=st.session_state.engineered_context,
-            answer=st.session_state.engineered_answer,
-            model_name=llm_model_name,
-        )
+            if not llm_api_key:
+                raise ValueError("LLM_API_KEY is missing from Streamlit secrets.")
 
-        st.success(
-            "Analysis complete: retrieval, re-ranking, contexts, metrics, and answers "
-            "are ready. Review Tab 2 for ranking details and Tab 3 for comparison."
-        )
+            if not llm_base_url:
+                raise ValueError("LLM_BASE_URL is missing from Streamlit secrets.")
+
+            llm_model_name = get_provider_model_id(llm_model_display_name)
+            st.session_state.selected_llm_model_name = llm_model_name
+
+            if llm_model_name == "PUT_PROVIDER_MODEL_ID_HERE":
+                raise ValueError(
+                    "The selected model still uses a placeholder provider model ID. "
+                    "Update src/config/model_config.py with the real model ID before "
+                    "running LLM generation."
+                )
+
+            st.session_state.metrics = calculate_context_metrics(
+                full_text=st.session_state.document_text,
+                naive_context=st.session_state.naive_context,
+                engineered_context=st.session_state.engineered_context,
+                model_name=llm_model_name,
+            )
+
+            naive_llm_start = time.perf_counter()
+            st.session_state.naive_answer = generate_answer(
+                question=question,
+                context=st.session_state.naive_context,
+                mode="Naive RAG",
+                api_key=llm_api_key,
+                base_url=llm_base_url,
+                model_name=llm_model_name,
+                temperature=llm_temperature,
+            )
+            st.session_state.processing_times["naive_llm_seconds"] = round(
+                time.perf_counter() - naive_llm_start,
+                4,
+            )
+
+            engineered_llm_start = time.perf_counter()
+            st.session_state.engineered_answer = generate_answer(
+                question=question,
+                context=st.session_state.engineered_context,
+                mode="Engineered Context Retrieval",
+                api_key=llm_api_key,
+                base_url=llm_base_url,
+                model_name=llm_model_name,
+                temperature=llm_temperature,
+            )
+            st.session_state.processing_times["engineered_llm_seconds"] = round(
+                time.perf_counter() - engineered_llm_start,
+                4,
+            )
+
+            st.session_state.naive_llm_token_estimate = calculate_llm_call_token_estimates(
+                question=question,
+                context=st.session_state.naive_context,
+                answer=st.session_state.naive_answer,
+                model_name=llm_model_name,
+            )
+
+            st.session_state.engineered_llm_token_estimate = (
+                calculate_llm_call_token_estimates(
+                    question=question,
+                    context=st.session_state.engineered_context,
+                    answer=st.session_state.engineered_answer,
+                    model_name=llm_model_name,
+                )
+            )
+
+            total_processing_seconds = round(
+                time.perf_counter() - total_start_time,
+                4,
+            )
+            st.session_state.processing_times["total_processing_seconds"] = (
+                total_processing_seconds
+            )
+
+            log_process_event(
+                build_analysis_log_event(
+                    run_id=run_id,
+                    event_type="analysis_run",
+                    status="success",
+                    total_processing_seconds=total_processing_seconds,
+                    **log_settings,
+                )
+            )
+
+            st.success(
+                "Analysis complete: retrieval, re-ranking, contexts, metrics, and "
+                "answers are ready. Review Tab 2 for ranking details and Tab 3 for "
+                "comparison."
+            )
+
+        except Exception as run_error:
+            total_processing_seconds = round(
+                time.perf_counter() - total_start_time,
+                4,
+            )
+            st.session_state.processing_times["total_processing_seconds"] = (
+                total_processing_seconds
+            )
+            log_process_event(
+                build_analysis_log_event(
+                    run_id=run_id,
+                    event_type="analysis_run",
+                    status="failed",
+                    error_message=str(run_error),
+                    total_processing_seconds=total_processing_seconds,
+                    **log_settings,
+                )
+            )
+            st.error(f"Analysis run failed: {run_error}")
 
 # Render metrics after the run block so the same rerun shows updated values.
 st.subheader("Context Efficiency Metrics")
@@ -705,6 +949,31 @@ with tab_1:
         show_formula_hint(
             "Higher spikes indicate stronger semantic shifts between neighboring sentences."
         )
+
+        st.subheader("Chunk Similarity Heatmap")
+        if (
+            st.session_state.chunk_similarity_matrix is not None
+            and not st.session_state.chunk_similarity_matrix.empty
+        ):
+            try:
+                styled_matrix = st.session_state.chunk_similarity_matrix.style.background_gradient(
+                    cmap="Blues"
+                )
+                st.dataframe(styled_matrix, width="stretch")
+            except Exception:
+                st.dataframe(
+                    st.session_state.chunk_similarity_matrix,
+                    width="stretch",
+                )
+            show_formula_hint(
+                "This heatmap shows how similar semantic chunks are to each other. "
+                "Higher values mean the chunks discuss similar topics."
+            )
+
+        else:
+            st.info(
+                "Chunk similarity visuals appear after semantic chunks are created on upload."
+            )
     else:
         st.info(
             "Upload a document to calculate sentence embeddings and semantic distances."
@@ -1215,6 +1484,10 @@ with tab_3:
 #- **Long retrieved contexts** can make provider input usage much larger than answer-only counts shown in the UI.
 #        """
 #        )
+
+    st.divider()
+
+    show_processing_time_summary(st.session_state.processing_times)
 
     st.divider()
 

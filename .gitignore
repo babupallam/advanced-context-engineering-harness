@@ -21,3 +21,4 @@ src/__pycache__/*
 
 .streamlit/secrets.toml
 MY FILES/
+logs/
