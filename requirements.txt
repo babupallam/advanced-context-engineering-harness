@@ -5,3 +5,4 @@ pymupdf
 sentence-transformers
 scikit-learn
 openai
+tiktoken

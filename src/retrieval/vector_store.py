@@ -1,5 +1,5 @@
 import numpy as np
-from src.parent_child import build_child_embedding_text
+from src.retrieval.parent_child import build_child_embedding_text
 
 def normalize_vectors(vectors):
     """

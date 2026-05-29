@@ -1,4 +1,4 @@
-from src.reranker import get_selected_reranked_results
+from src.retrieval.reranker import get_selected_reranked_results
 
 def build_naive_context(raw_vector_results, max_chunks=5):
     """
